@@ -5,5 +5,11 @@ build_from:
 labels:
   org.opencontainers.image.title: "Home Assistant Add-on: Claude Terminal"
   org.opencontainers.image.description: "Terminal interface for Anthropic's Claude Code CLI"
-  org.opencontainers.image.source: "https://github.com/heytcass/home-assistant-addons"
+  # Per the OCI spec this is the repository the image was *built from*, which
+  # for a fork is the fork itself -- CI here builds from this tree, not
+  # upstream's. GHCR also uses this label to link the published package to a
+  # repository, so pointing it upstream leaves these packages unlinked.
+  # Upstream authorship is credited in org.opencontainers.image.authors.
+  org.opencontainers.image.source: "https://github.com/WetDogNose/home-assistant-claude"
+  org.opencontainers.image.authors: "Tom Cassady <heytcass@gmail.com> (upstream: heytcass/home-assistant-addons)"
   org.opencontainers.image.licenses: "MIT"
