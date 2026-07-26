@@ -1,11 +1,16 @@
 name: Publish Images
 
 # Builds the add-on for all architectures and pushes the images to GHCR.
-# Once the packages are made public and config.yaml gains an `image:` key,
-# Home Assistant installs pull these prebuilt images instead of building
-# locally — which fixes build OOM on small boxes (#56) and stops the
-# Supervisor from exporting the locally-built image into every backup
-# (the second half of #103).
+# Home Assistant installs pull these prebuilt images (via the `image:` key in
+# config.yaml) instead of building locally — which fixes build OOM on small
+# boxes (#56) and stops the Supervisor from exporting the locally-built image
+# into every backup (the second half of #103).
+#
+# Images publish to the GHCR namespace of whoever owns this repository, so a
+# fork publishes to — and its config.yaml `image:` key must point at — its own
+# namespace. The two must agree or the Supervisor pulls someone else's build.
+# Note: GHCR package names must be lowercase, but a GitHub owner login may be
+# mixed-case, so the namespace is lowercased below before use.
 
 on:
   workflow_dispatch:
@@ -37,6 +42,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR rejects uppercase repository names, and github.repository_owner
+      # preserves the login's case (e.g. "WetDogNose"), so lowercase it here.
+      - name: Resolve GHCR namespace
+        id: ns
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+          echo "Publishing to ghcr.io/${owner}"
+
       - name: Build and push add-on image
         uses: home-assistant/builder@2026.02.1
         with:
@@ -44,5 +58,5 @@ jobs:
             --${{ matrix.arch }} \
             --target /data/claude-terminal \
             --image "${{ matrix.arch }}-addon-claude-terminal" \
-            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
+            --docker-hub "ghcr.io/${{ steps.ns.outputs.owner }}" \
             --addon

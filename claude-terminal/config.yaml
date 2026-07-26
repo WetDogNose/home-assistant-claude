@@ -7,7 +7,10 @@ init: false
 
 # Prebuilt images on GHCR — the Supervisor pulls these instead of building
 # locally (no build OOM, no image blobs in backups). Tag = version below.
-image: "ghcr.io/heytcass/{arch}-addon-claude-terminal"
+# Must match the namespace .github/workflows/publish-images.yml pushes to
+# (this repo's owner, lowercased); otherwise installs pull upstream's build
+# rather than the one built from this tree.
+image: "ghcr.io/wetdognose/{arch}-addon-claude-terminal"
 
 # Supported architectures (armv7 dropped in 2.5.0: HAOS dropped 32-bit ARM,
 # and neither Claude Code native builds nor managed Python exist for it)
