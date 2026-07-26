@@ -9,8 +9,10 @@ name: Publish Images
 # Images publish to the GHCR namespace of whoever owns this repository, so a
 # fork publishes to — and its config.yaml `image:` key must point at — its own
 # namespace. The two must agree or the Supervisor pulls someone else's build.
-# Note: GHCR package names must be lowercase, but a GitHub owner login may be
-# mixed-case, so the namespace is lowercased below before use.
+# GHCR package names must be lowercase while a GitHub owner login may be
+# mixed-case. home-assistant/builder already normalises this internally, so
+# the explicit lowercasing below is belt-and-braces, not a fix for a real
+# failure -- it just keeps the resolved namespace visible in the run log.
 
 on:
   workflow_dispatch:
@@ -42,8 +44,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # GHCR rejects uppercase repository names, and github.repository_owner
-      # preserves the login's case (e.g. "WetDogNose"), so lowercase it here.
+      # github.repository_owner preserves the login's case (e.g. "WetDogNose");
+      # the builder lowercases it anyway, so this is for log clarity.
       - name: Resolve GHCR namespace
         id: ns
         run: |
