@@ -14,12 +14,17 @@ name: Publish Images
 # the explicit lowercasing below is belt-and-braces, not a fix for a real
 # failure -- it just keeps the resolved namespace visible in the run log.
 
+# Publishing is tag-driven: the image tag comes from config.yaml's version, so
+# publishing on every push to main silently rewrote whatever tag the current
+# version named. That made "2.5.1" mean different things over time, and since
+# the Supervisor compares version strings it would not offer an update anyway.
+# One v* tag now maps to exactly one immutable image. Use the local podman loop
+# in DEVELOPMENT.md for day-to-day iteration.
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - "claude-terminal/**"
+    tags:
+      - "v*"
 
 jobs:
   publish:

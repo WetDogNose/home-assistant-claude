@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.5.1-wdn.1
+
+First release of the WetDogNose fork of
+[heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons).
+No functional change to the add-on itself — this release repoints the build
+and distribution pipeline at this repository.
+
+- Images are built by this repo's CI and published to
+  `ghcr.io/wetdognose/{arch}-addon-claude-terminal`, so what Home Assistant
+  pulls is built from this tree rather than upstream's prebuilt binaries.
+- Renamed to "Claude Terminal (WetDogNose)" with slug `claude_terminal_wdn`,
+  so it installs alongside upstream's add-on instead of shadowing it.
+- Publishing is now driven by `v*` tags rather than every push to `main`, so
+  one tag maps to exactly one immutable image.
+- Fork versions are `<upstream base>-wdn.<n>`, keeping the upstream release
+  this is based on visible.
+
+Upstream authorship is unchanged and credited in the image's
+`org.opencontainers.image.authors` label.
+
 ## 2.5.1
 
 ### 🐛 Blank terminal when the persistent Claude build can't run

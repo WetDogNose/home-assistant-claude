@@ -2,7 +2,7 @@
 
 Claude Code in a web terminal, as a Home Assistant add-on.
 
-![Claude Terminal Screenshot](https://github.com/heytcass/home-assistant-addons/raw/main/claude-terminal/screenshot.png)
+![Claude Terminal Screenshot](https://github.com/WetDogNose/home-assistant-claude/raw/main/claude-terminal/screenshot.png)
 
 *Claude Terminal running in Home Assistant*
 

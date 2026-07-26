@@ -91,10 +91,20 @@ Workflows in `.github/workflows/`:
 - **build-test.yml** (PRs touching `claude-terminal/**`) — hadolint + amd64/aarch64 builds, then amd64 smoke tests asserting specific scripts are executable and specific binaries exist. **Adding a script to `scripts/` or a required binary means updating the lists in this workflow.**
 - **shellcheck.yml** (PRs touching `*.sh`) — severity `warning`, `-e SC1008 -e SC1091`
 - **security-scan.yml** — Trivy HIGH/CRITICAL, on Dockerfile/run.sh PRs and weekly
-- **publish-images.yml** — on any push to `main` touching `claude-terminal/**`, builds and pushes `ghcr.io/heytcass/{arch}-addon-claude-terminal` via `home-assistant/builder` (pinned). The Supervisor pulls these; it does not build locally.
+- **publish-images.yml** — on `v*` tags (and manual dispatch), builds and pushes `ghcr.io/wetdognose/{arch}-addon-claude-terminal` via `home-assistant/builder` (pinned). The Supervisor pulls these; it does not build locally.
 - **release.yml** — on `v*` tags; **fails if the tag doesn't match `version:` in `config.yaml`**, and extracts release notes from the `## <version>` section of `claude-terminal/CHANGELOG.md`
 
-So a user-visible change needs, together: the code change, a bumped `version:` in `claude-terminal/config.yaml`, a matching `## <version>` section in `claude-terminal/CHANGELOG.md`, and a `v<version>` tag.
+## Fork layout
+
+This repo is a fork of [heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons), repointed so Home Assistant runs images built from *this* tree:
+
+- `config.yaml` `image:` and `publish-images.yml` must name the **same** GHCR namespace (`wetdognose`), or installs silently pull upstream's build instead of yours.
+- The GHCR packages must be **public** — the Supervisor pulls anonymously. New packages default to private, and there is no API to change that; it's web-UI only.
+- Identity is `name: "Claude Terminal (WetDogNose)"` / `slug: claude_terminal_wdn`, distinct from upstream so both can be installed side by side. **Changing the slug creates a new add-on with an empty `/data`** — a fresh Claude login.
+- Versions are `<upstream base>-wdn.<n>`. The Supervisor compares version strings, so shipping new code under an unchanged version means HA never offers the update.
+- Keep the `upstream` remote. Fetching is inert; divergence concentrates in `config.yaml`, `build.yaml` and `repository.yaml`, so merges stay small.
+
+A deployable change needs, together: the code change, a bumped `version:` in `claude-terminal/config.yaml`, a matching `## <version>` section in `claude-terminal/CHANGELOG.md`, and a pushed `v<version>` tag — the tag is what both publishes the image and cuts the release. Pushing to `main` alone ships nothing.
 
 Keep `claude-terminal/DOCS.md` (the options table and troubleshooting shown in the HA UI) in sync when options or user-facing behavior change. Note the root `DOCS.md` is an older, diverged copy.
 

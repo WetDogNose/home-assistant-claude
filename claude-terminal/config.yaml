@@ -1,8 +1,14 @@
 ---
-name: "Claude Terminal"
+name: "Claude Terminal (WetDogNose)"
 description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
-version: "2.5.1"
-slug: "claude_terminal"
+# Fork versioning: <upstream base>-wdn.<n>, so the upstream release this is
+# based on stays visible and tags never collide with upstream's. Bump on every
+# deployable change -- the Supervisor compares version strings, so pushing new
+# code under an unchanged version means HA never offers the update.
+version: "2.5.1-wdn.1"
+# Distinct from upstream's "claude_terminal" so both can be installed side by
+# side. Changing this again creates a NEW add-on with an empty /data.
+slug: "claude_terminal_wdn"
 init: false
 
 # Prebuilt images on GHCR — the Supervisor pulls these instead of building
@@ -19,7 +25,7 @@ arch:
   - amd64
 
 # External resources
-url: "https://github.com/heytcass/home-assistant-addons"
+url: "https://github.com/WetDogNose/home-assistant-claude"
 
 # Web interface configuration
 ingress: true
