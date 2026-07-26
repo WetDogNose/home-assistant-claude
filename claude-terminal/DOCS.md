@@ -8,13 +8,23 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 
 ## Installation
 
-1. Add this repository to your Home Assistant add-on store
-2. Install the Claude Terminal add-on
-3. Start the add-on
-4. Click "OPEN WEB UI" to access the terminal
-5. On first use, follow the OAuth prompts to log in to your Anthropic account
+1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
+2. Click the **⋮** menu in the top right and choose **Repositories**
+3. Add `https://github.com/WetDogNose/home-assistant-claude` and click **Add**
+4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
+5. Start the add-on, then click **OPEN WEB UI** to access the terminal
+6. On first use, follow the OAuth prompts to log in to your Anthropic account
+
+Images are pulled prebuilt from `ghcr.io/wetdognose`, so installing does not
+build anything on your Home Assistant machine.
 
 Your credentials are stored under `/data` and persist across restarts and add-on updates, so you won't need to log in again.
+
+> **This is a fork.** It uses the slug `claude_terminal_wdn`, distinct from
+> upstream's `claude_terminal`, so it installs alongside the original instead
+> of replacing it. Each has its own `/data`, so each needs its own Claude
+> login and keeps its own session history. See
+> [Upstream & attribution](#upstream--attribution).
 
 ## Options
 
@@ -81,6 +91,23 @@ Disable it with `enable_ha_mcp: false` if you don't want Claude to have this acc
 - **Diagnostics**: run `claude-doctor` in the terminal for connectivity, memory, and environment checks.
 - **Authentication problems**: run `claude /logout` inside Claude, then log in again.
 - **Old backups too large?** Versions before 2.3.0 accumulated an npm cache in the add-on's data directory (up to several GB). 2.3.0 removes it automatically on first boot — take a fresh backup after upgrading.
+
+## Upstream & attribution
+
+The Claude Terminal add-on is the work of
+**[Tom Cassady (@heytcass)](https://github.com/heytcass)** and contributors, in
+[heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons).
+All credit for the original add-on belongs there.
+
+This fork changes only how the add-on is built and distributed: images are
+built by this repository's CI and published to `ghcr.io/wetdognose`, so what
+Home Assistant runs is built from source you can inspect. Both projects are
+MIT licensed; original work © Tom Cassady and contributors.
+
+Report problems with **this fork** at
+<https://github.com/WetDogNose/home-assistant-claude/issues>, not upstream —
+the upstream maintainer did not build these images and cannot reproduce
+changes made here.
 
 ## Credits
 
