@@ -46,12 +46,13 @@ There is **no unit/integration test suite.** Verification is: lint + a container
 
 ### Container execution flow (`run.sh` `main()`)
 1. `init_environment` — point HOME/XDG at `/data` (persistent), prepend `/data/home/.local/bin` to PATH, clean legacy npm cache, migrate legacy credentials, install `.tmux.conf`
-2. `setup_commands` — install `welcome`, `persist-install`, `ha-context`, `claude-doctor` (health-check.sh), `claude-login-url` into `/usr/local/bin`; write the add-on version to `/opt/scripts/addon-version` (bashio isn't available inside ttyd)
+2. `setup_commands` — install `welcome`, `persist-install`, `ha-context`, `claude-doctor` (health-check.sh), `claude-login-url`, `github-setup` into `/usr/local/bin`; write the add-on version to `/opt/scripts/addon-version` (bashio isn't available inside ttyd)
 3. `update_claude` — validate/repair the persistent native install, then background install/update into `/data`
 4. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`)
-5. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
-6. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`
-7. `start_web_terminal` — `exec ttyd ... tmux new-session -A -s claude 'claude [flags]'` (or `welcome --shell` when `auto_launch_claude: false`)
+5. `configure_git` — sets the global commit identity from options, and runs `gh auth setup-git` **only if** `$XDG_CONFIG_HOME/gh/hosts.yml` exists. Gated on the file, not on `gh auth status`, because that would put a network call on the boot path
+6. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
+7. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`
+8. `start_web_terminal` — `exec ttyd ... tmux new-session -A -s claude 'claude [flags]'` (or `welcome --shell` when `auto_launch_claude: false`)
 
 ### Key design rules
 - **Nothing on the boot path may hit the network or block on input.** Network work (updates, context generation, MCP pre-warm) is backgrounded; packages ship in the image.
@@ -72,16 +73,18 @@ All options are read via `bashio::config` (from `/data/options.json`):
 | `dangerously_skip_permissions`, `claude_extra_args` | `build_claude_flags` (word-split; quoted multi-word args are a documented limitation) |
 | `ha_smart_context` | `generate_ha_context` |
 | `enable_ha_mcp`, `ha_mcp_version` | `scripts/setup-ha-mcp.sh` |
+| `git_user_name`, `git_user_email` | `configure_git` |
 | `persistent_apk_packages`, `persistent_pip_packages` | `install_persistent_packages` |
 
 ### Notable subsystem constraints
 - **ha-mcp** requires CPython 3.13 exactly; Alpine 3.21 ships 3.12, so `uvx --python 3.13` provisions a managed musl build into `/data` (hence the pinned `uv==0.11.28` from PyPI — Alpine's apk `uv` can't do this). `--index-strategy unsafe-best-match` is required for the HA wheels index.
 - **Clipboard**: ttyd advertises `TERM=xterm-256color`, whose terminfo lacks `Ms`, so `tmux.conf` teaches tmux the OSC 52 escape explicitly. OSC 52 truncates around ~400 chars, which is shorter than Claude's OAuth login URL — that's the entire reason `claude-login-url` exists (it `capture-pane -J`s the URL out of the session into `/config`).
 - **tmux status bar** shells out to `scripts/tmux-status.sh` every 15s; it must stay fast (<1s) and needs no bashio.
+- **GitHub** is the `gh` CLI from Alpine community (no MCP server). Credentials persist for free because `gh` reads `$XDG_CONFIG_HOME/gh` and `init_environment` already points `XDG_CONFIG_HOME` at `/data/.config` — don't add persistence code for it. Authentication is interactive (`github-setup`) by design: there is no token option, because `/data/options.json` is plaintext and rides along in HA backups.
 
 ### Script conventions
 - `#!/usr/bin/with-contenv bashio` for boot-path scripts (`run.sh`, `setup-ha-mcp.sh`, `health-check.sh`, `persist-install.sh`)
-- plain `#!/bin/bash` for scripts that run inside the user's terminal (`welcome.sh`, `ha-context.sh`, `tmux-status.sh`, `claude-login-url.sh`) — **no bashio there**; ttyd's environment doesn't provide it
+- plain `#!/bin/bash` for scripts that run inside the user's terminal (`welcome.sh`, `ha-context.sh`, `tmux-status.sh`, `claude-login-url.sh`, `github-setup.sh`) — **no bashio there**; ttyd's environment doesn't provide it
 - 4-space indent in shell, 2-space in YAML; credential files get 600 permissions
 - Errors report via `bashio::log.error` / `bashio::log.warning` and continue
 

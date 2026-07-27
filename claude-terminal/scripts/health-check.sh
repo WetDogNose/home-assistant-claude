@@ -91,6 +91,51 @@ check_claude_cli() {
     fi
 }
 
+check_github_cli() {
+    bashio::log.info "=== GitHub CLI Check ==="
+
+    if ! command -v gh >/dev/null 2>&1; then
+        bashio::log.error "gh not found ✗"
+        return 1
+    fi
+    bashio::log.info "gh installed: $(gh --version 2>/dev/null | head -1) ✓"
+
+    # Check the credentials file before calling gh auth status, so an
+    # unauthenticated add-on reports instantly instead of waiting on a network
+    # round trip that is expected to fail
+    local hosts_file="${XDG_CONFIG_HOME:-$HOME/.config}/gh/hosts.yml"
+    if [ ! -f "$hosts_file" ]; then
+        bashio::log.warning "gh is not signed in - run 'github-setup' in the terminal"
+        return 0
+    fi
+
+    if gh auth status >/dev/null 2>&1; then
+        bashio::log.info "gh authenticated ✓"
+    else
+        bashio::log.warning "gh credentials exist but were rejected (expired or revoked token?)"
+        bashio::log.info "Re-run 'github-setup' to sign in again"
+    fi
+
+    # Authentication alone does not make `git push` work; the credential helper
+    # is a separate step and is the usual reason a push unexpectedly prompts
+    if git config --global --get-regexp '^credential\..*\.helper$' 2>/dev/null | grep -q 'gh auth'; then
+        bashio::log.info "git credential helper: gh ✓"
+    else
+        bashio::log.warning "git credential helper not configured - 'git push' may prompt"
+        bashio::log.info "Fix with: gh auth setup-git"
+    fi
+
+    local git_name git_email
+    git_name=$(git config --global user.name 2>/dev/null)
+    git_email=$(git config --global user.email 2>/dev/null)
+    if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+        bashio::log.info "Commit identity: ${git_name} <${git_email}> ✓"
+    else
+        bashio::log.warning "No commit identity set - git will refuse to commit"
+        bashio::log.info "Set git_user_name and git_user_email in the add-on configuration"
+    fi
+}
+
 check_network_connectivity() {
     bashio::log.info "=== Network Connectivity Check ==="
 
@@ -131,6 +176,13 @@ check_network_connectivity() {
     else
         bashio::log.warning "Cannot reach Anthropic API - this may affect Claude functionality"
     fi
+
+    # Try to reach the GitHub API
+    if curl -s --head --connect-timeout 10 --max-time 15 https://api.github.com > /dev/null; then
+        bashio::log.info "Can reach GitHub API ✓"
+    else
+        bashio::log.warning "Cannot reach GitHub API - gh commands will fail"
+    fi
 }
 
 run_diagnostics() {
@@ -144,6 +196,7 @@ run_diagnostics() {
     check_directory_permissions || ((errors++))
     check_node_installation || ((errors++))
     check_claude_cli || ((errors++))
+    check_github_cli || ((errors++))
     check_network_connectivity || ((errors++))
 
     bashio::log.info "========================================="

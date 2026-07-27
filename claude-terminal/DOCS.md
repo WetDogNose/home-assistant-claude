@@ -37,6 +37,8 @@ Your credentials are stored under `/data` and persist across restarts and add-on
 | `ha_smart_context` | `true` | Generate a CLAUDE.md with your HA system info so Claude knows your setup. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
 | `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run. |
+| `git_user_name` | `""` | Name used to author git commits made from the terminal. Reapplied on every restart. |
+| `git_user_email` | `""` | Email used to author git commits made from the terminal. Reapplied on every restart. |
 | `persistent_apk_packages` | `[]` | APK packages reinstalled on every startup. |
 | `persistent_pip_packages` | `[]` | Python packages reinstalled on every startup. |
 
@@ -52,6 +54,7 @@ claude -c       # continue the most recent conversation
 claude -r       # pick a past conversation to resume
 claude-doctor   # diagnose network, auth, and environment issues
 claude-login-url   # save the OAuth login URL to /config (see Troubleshooting)
+github-setup    # sign in to GitHub and enable git push (see GitHub below)
 persist-install apk htop   # install packages that survive restarts
 ha-context      # refresh the Home Assistant context file
 ```
@@ -77,6 +80,57 @@ The bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server connects
 ha-mcp requires Python 3.13, which Alpine doesn't ship — the add-on provisions a managed Python build via [uv](https://github.com/astral-sh/uv) into `/data` on first use (a one-time ~150–250 MB download that persists across restarts and is included in HA backups). The environment is pre-warmed in the background at startup so the first MCP connection is fast.
 
 Disable it with `enable_ha_mcp: false` if you don't want Claude to have this access.
+
+## GitHub
+
+The [GitHub CLI](https://cli.github.com/) (`gh`) is included, so Claude can read
+and manage your repositories — issues, pull requests, releases, Actions runs —
+and push commits, all from the terminal.
+
+### Setup
+
+Run `github-setup` once and follow the prompts:
+
+```bash
+github-setup
+```
+
+You'll get a short `github.com/login/device` URL and an 8-character code. Open
+the URL on any device, enter the code, and authorize. Because both are short,
+this avoids the clipboard-truncation problem that affects Claude's own login
+(see Troubleshooting).
+
+The helper then runs `gh auth setup-git`, which is what actually makes
+`git push` work — authenticating alone is not enough, and skipping this step is
+the usual reason a push later fails asking for a password.
+
+Set `git_user_name` and `git_user_email` in the add-on configuration so commits
+have an author; git refuses to commit without one. Both are reapplied on every
+restart.
+
+Your credentials are written to `/data/.config/gh/hosts.yml` and persist across
+restarts and add-on updates, so this is a one-time setup. Sign out with
+`gh auth logout`.
+
+### Security
+
+Read this before signing in — it grants real access.
+
+- **Your token is stored in plaintext and is included in Home Assistant
+  backups.** Alpine has no keyring, so `hosts.yml` holds the token as text, and
+  `/data` is part of every backup. Treat your backups as secrets.
+- **Choose scopes narrowly.** The `gh auth login` defaults are usually right.
+  Avoid the `workflow` scope unless you need it — it permits rewriting CI
+  workflows, which is arbitrary code execution in GitHub Actions. For the
+  tightest control, create a fine-grained token limited to specific
+  repositories and use `gh auth login --with-token`.
+- **GitHub content is untrusted input.** Issue text, pull request descriptions
+  and READMEs are written by other people. Once Claude can read them and also
+  push, a prompt injection hidden in an issue has both a source and a channel.
+  Keeping `dangerously_skip_permissions` off means pushes still need your
+  confirmation, which is the main thing standing between the two.
+- **Revoking is easy** — `gh auth logout`, or revoke the token in your GitHub
+  settings. Do that if you hand a backup to anyone.
 
 ## Security notes
 

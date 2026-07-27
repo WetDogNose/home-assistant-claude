@@ -16,6 +16,7 @@ echo -e "  ${TERRACOTTA}Claude Terminal${NC}  ${DIM}v${version} · Home Assistan
 echo ""
 echo -e "  ${WHITE}claude${NC}            start Claude Code  ${DIM}(-c continue · -r resume a session)${NC}"
 echo -e "  ${WHITE}claude-doctor${NC}     diagnose network, auth, and environment issues"
+echo -e "  ${WHITE}github-setup${NC}      sign in to GitHub so Claude can manage your repos"
 echo -e "  ${WHITE}persist-install${NC}   install apk/pip packages that survive restarts"
 echo -e "  ${WHITE}ha-context${NC}        refresh the Home Assistant context file for Claude"
 echo ""

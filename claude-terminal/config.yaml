@@ -49,6 +49,8 @@ options:
   ha_smart_context: true
   enable_ha_mcp: true
   ha_mcp_version: "7.11.0"
+  git_user_name: ""
+  git_user_email: ""
   persistent_apk_packages: []
   persistent_pip_packages: []
 schema:
@@ -59,6 +61,12 @@ schema:
   ha_smart_context: bool?
   enable_ha_mcp: bool?
   ha_mcp_version: str?
+  # Commit identity for git operations from the terminal. GitHub itself is
+  # authenticated interactively with `github-setup`, deliberately keeping the
+  # token out of this file -- /data/options.json is plaintext and is included
+  # in Home Assistant backups.
+  git_user_name: str?
+  git_user_email: str?
   persistent_apk_packages:
     - str
   persistent_pip_packages:
