@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # HA Smart Context — generates a CLAUDE.md with Home Assistant context
-# Claude Code auto-loads CLAUDE.md from HOME, giving every session HA awareness
+#
+# Written to $HOME/.claude/CLAUDE.md, which is Claude Code's USER memory file.
+# This previously wrote $HOME/CLAUDE.md, which Claude never loads: user memory
+# is ~/.claude/CLAUDE.md and project memory is ./CLAUDE.md discovered upward
+# from the working directory (/config). $HOME/CLAUDE.md is neither, so the
+# whole ha_smart_context feature silently did nothing.
 #
 # Usage:
 #   ha-context          Generate medium-detail context (default)
@@ -9,7 +14,7 @@
 #   ha-context --help   Show usage
 
 SUPERVISOR_URL="http://supervisor"
-OUTPUT_FILE="${HOME}/CLAUDE.md"
+OUTPUT_FILE="${HOME}/.claude/CLAUDE.md"
 FULL_MODE=false
 
 # Parse arguments
@@ -31,7 +36,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --full       Include entity ID listings (detailed mode)"
-            echo "  --output F   Write to file F instead of \$HOME/CLAUDE.md"
+            echo "  --output F   Write to file F instead of \$HOME/.claude/CLAUDE.md"
             echo "  --help       Show this help"
             exit 0
             ;;
@@ -210,6 +215,8 @@ section_recent_errors() {
 generate_claude_md() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    mkdir -p "$(dirname "$OUTPUT_FILE")"
 
     local tmp_file
     tmp_file=$(mktemp "${OUTPUT_FILE}.XXXXXX")

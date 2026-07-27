@@ -36,7 +36,22 @@ runs() {
 for candidate in "$PERSISTENT" "$BUNDLED"; do
     [ -x "$candidate" ] || continue
     if runs "$candidate"; then
-        exec "$candidate" "$@"
+        # NOT exec: when Claude exits (/exit, Ctrl-D, or a crash) an exec'd
+        # process ends the tmux session, so the browser panel just goes blank
+        # and any error Claude printed is destroyed with it. Run it as a child
+        # and stay alive afterwards so the user keeps the scrollback and a
+        # usable prompt.
+        "$candidate" "$@"
+        status=$?
+        echo ""
+        if [ "$status" -eq 0 ]; then
+            echo -e "  ${DIM}Claude exited. Type 'claude' to start again, or 'exit' to close.${NC}"
+        else
+            echo -e "  ${YELLOW}Claude exited with status ${status}.${NC}"
+            echo -e "  ${DIM}Run 'claude-doctor' to check the environment, or 'claude' to retry.${NC}"
+        fi
+        echo ""
+        exec /usr/local/bin/welcome --shell
     fi
     echo "claude-launch: ${candidate} is present but fails to run; trying fallback" >&2
 done
