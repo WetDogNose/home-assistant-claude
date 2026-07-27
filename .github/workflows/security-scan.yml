@@ -97,7 +97,7 @@ jobs:
       # are in the job summary above regardless. Drop continue-on-error if the
       # repo becomes public or gains Advanced Security.
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         continue-on-error: true
         with:
