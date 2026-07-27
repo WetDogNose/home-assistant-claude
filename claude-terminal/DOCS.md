@@ -70,7 +70,7 @@ Your credentials are stored under `/data` and persist across restarts and add-on
 | `claude_version` | `""` | Pin Claude Code to `stable`, `latest`, or an exact `X.Y.Z`. Empty tracks the newest release. Use this if an upstream release will not run in this add-on — see below. |
 | `dangerously_skip_permissions` | `false` | Launch Claude with `--dangerously-skip-permissions` (no confirmation prompts). **Read the security note below.** |
 | `claude_extra_args` | `""` | Extra flags appended to every Claude launch, e.g. `--model claude-sonnet-5`. Values are split on spaces; quoted multi-word arguments are not supported. |
-| `ha_smart_context` | `true` | Generate a CLAUDE.md with your HA system info so Claude knows your setup. |
+| `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
 | `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run. |
 | `git_user_name` | `""` | Name used to author git commits made from the terminal. Reapplied on every restart. |
@@ -91,6 +91,7 @@ claude -r       # pick a past conversation to resume
 claude-doctor   # diagnose network, auth, and environment issues
 claude-login-url   # save the OAuth login URL to /config (see Troubleshooting)
 github-setup    # sign in to GitHub and enable git push (see GitHub below)
+data-gc         # show what is using space under /data; 'data-gc clean' prunes it
 persist-install apk htop   # install packages that survive restarts
 ha-context      # refresh the Home Assistant context file
 ```
