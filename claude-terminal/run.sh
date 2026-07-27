@@ -462,8 +462,16 @@ start_web_terminal() {
     #
     # The dev escape hatch is deliberately gated on SUPERVISOR_TOKEN being
     # unset, so it can never disable enforcement inside a real add-on.
-    local auth_args=()
-    if [ "$(bashio::config 'require_ingress_user' 'true')" = "true" ]; then
+    # FAIL CLOSED. bashio::config returns empty when it cannot reach the
+    # Supervisor API, so testing for "= true" meant a transient API failure
+    # silently dropped authentication on a running add-on. Only an explicit
+    # "false" disables it; anything else -- including an unreadable config --
+    # enforces. Caught by ci/boot-test.sh, which saw HTTP 200 with no identity.
+    local require_user auth_args=()
+    require_user=$(bashio::config 'require_ingress_user' 'true' 2>/dev/null) || require_user="true"
+    [ -z "$require_user" ] || [ "$require_user" = "null" ] && require_user="true"
+
+    if [ "$require_user" != "false" ]; then
         auth_args=(--auth-header "X-Remote-User-Id")
         bashio::log.info "Ingress identity enforcement ON (set require_ingress_user: false if the terminal will not connect)"
     elif [ -n "${SUPERVISOR_TOKEN:-}" ]; then
@@ -473,7 +481,9 @@ start_web_terminal() {
         bashio::log.warning "this terminal as root."
         bashio::log.warning "=========================================================="
     else
-        bashio::log.info "No SUPERVISOR_TOKEN: local development, ingress enforcement off"
+        # Local development only, and only when explicitly asked for: a missing
+        # SUPERVISOR_TOKEN alone must never be enough to disable the gate.
+        bashio::log.warning "require_ingress_user is false and there is no Supervisor: enforcement off (local development)"
     fi
 
     # Run ttyd with keepalive configuration to prevent WebSocket disconnects
