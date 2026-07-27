@@ -110,7 +110,8 @@ setup_commands() {
         "persist-install:/opt/scripts/persist-install.sh" \
         "ha-context:/opt/scripts/ha-context.sh" \
         "claude-doctor:/opt/scripts/health-check.sh" \
-        "claude-login-url:/opt/scripts/claude-login-url.sh"; do
+        "claude-login-url:/opt/scripts/claude-login-url.sh" \
+        "github-setup:/opt/scripts/github-setup.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -270,6 +271,41 @@ install_persistent_packages() {
     fi
 }
 
+# Configure git for use from the terminal.
+#
+# Both halves are purely local config writes, so this is safe on the boot path
+# — no network, nothing to block on. GitHub itself is authenticated
+# interactively via `github-setup`; there is deliberately no token option,
+# because /data/options.json is plaintext and rides along in HA backups.
+configure_git() {
+    local git_name git_email
+    git_name=$(bashio::config 'git_user_name' '')
+    git_email=$(bashio::config 'git_user_email' '')
+
+    # $HOME is /data/home, so ~/.gitconfig persists across restarts
+    if [ -n "$git_name" ] && [ "$git_name" != "null" ]; then
+        git config --global user.name "$git_name" \
+            || bashio::log.warning "Failed to set git user.name"
+    fi
+    if [ -n "$git_email" ] && [ "$git_email" != "null" ]; then
+        git config --global user.email "$git_email" \
+            || bashio::log.warning "Failed to set git user.email"
+    fi
+
+    # Register gh as git's credential helper so `git push` works over HTTPS.
+    # Gated on the credentials file existing rather than on `gh auth status`,
+    # which would put a network call on the boot path.
+    if [ -f "${XDG_CONFIG_HOME}/gh/hosts.yml" ]; then
+        if gh auth setup-git >/dev/null 2>&1; then
+            bashio::log.info "GitHub CLI authenticated; git credential helper configured"
+        else
+            bashio::log.warning "gh auth setup-git failed; 'git push' may prompt for credentials"
+        fi
+    else
+        bashio::log.info "GitHub CLI not authenticated; run 'github-setup' in the terminal to sign in"
+    fi
+}
+
 # Generate Home Assistant context file for Claude sessions (background —
 # a slow Supervisor API must never delay the terminal)
 generate_ha_context() {
@@ -375,6 +411,7 @@ main() {
     setup_commands
     update_claude
     install_persistent_packages
+    configure_git
     generate_ha_context
     setup_ha_mcp
     start_web_terminal

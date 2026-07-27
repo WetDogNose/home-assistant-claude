@@ -24,6 +24,7 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 - **Session persistence**: tmux keeps your conversation alive across browser reloads and HA navigation; scrollback and mouse copy work
 - **Persistent auth**: log in once via OAuth; credentials survive restarts and updates
 - **Home Assistant MCP**: bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language control of your instance
+- **GitHub built in**: the `gh` CLI is included — run `github-setup` once and Claude can manage issues, PRs and releases, and push commits
 - **HA Smart Context**: Claude automatically knows your HA version, entities, and add-ons
 - **Broad file access**: `/config`, `/addon_configs`, and `/share` are mounted
 - **Persistent packages**: `persist-install` keeps your extra apk/pip tools across restarts
@@ -58,6 +59,8 @@ Works out of the box. All options:
 | `ha_smart_context` | `true` | Generate HA context file for Claude |
 | `enable_ha_mcp` | `true` | Home Assistant MCP server integration |
 | `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run |
+| `git_user_name` | `""` | Author name for git commits made from the terminal |
+| `git_user_email` | `""` | Author email for git commits made from the terminal |
 | `persistent_apk_packages` | `[]` | APK packages to install on startup |
 | `persistent_pip_packages` | `[]` | pip packages to install on startup |
 

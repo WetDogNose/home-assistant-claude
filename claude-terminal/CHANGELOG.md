@@ -20,6 +20,28 @@ and distribution pipeline at this repository.
 Upstream authorship is unchanged and credited in the image's
 `org.opencontainers.image.authors` label.
 
+### 🐙 GitHub built in
+The [GitHub CLI](https://cli.github.com/) (`gh`) now ships in the image, so
+Claude can manage your repositories — issues, pull requests, releases, Actions
+runs — and push commits, without leaving Home Assistant.
+
+Run `github-setup` once to sign in. It uses GitHub's device flow (a short URL
+plus an 8-character code, so no clipboard truncation) and then runs
+`gh auth setup-git`, which is the step that actually makes `git push` work.
+Credentials live in `/data/.config/gh` and persist across restarts and add-on
+updates.
+
+Two new options, `git_user_name` and `git_user_email`, set the commit author
+and are reapplied on every restart — git refuses to commit without them.
+`claude-doctor` gained a GitHub section covering sign-in state, the credential
+helper, the commit identity, and `api.github.com` reachability.
+
+There is deliberately **no token option**: authentication is interactive so the
+token never lands in `/data/options.json`, which is plaintext and visible in the
+Home Assistant UI. It is still worth knowing that the token `gh` stores is
+plaintext too (Alpine has no keyring) and that `/data` is included in backups —
+see the GitHub section in the documentation before signing in.
+
 ## 2.5.1
 
 ### 🐛 Blank terminal when the persistent Claude build can't run

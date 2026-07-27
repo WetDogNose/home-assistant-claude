@@ -70,6 +70,7 @@ jobs:
                 /opt/scripts/health-check.sh \
                 /opt/scripts/persist-install.sh \
                 /opt/scripts/ha-context.sh \
+                /opt/scripts/github-setup.sh \
                 /opt/scripts/welcome.sh; do
                 if [ ! -x "$script" ]; then
                   echo "FAIL: $script is not executable"
@@ -84,7 +85,7 @@ jobs:
         run: |
           docker run --rm --entrypoint /bin/bash \
             test/claude-terminal:amd64 -c '
-              for bin in node npm claude git tmux ttyd jq curl uv; do
+              for bin in node npm claude git gh tmux ttyd jq curl uv; do
                 if ! which "$bin" > /dev/null 2>&1; then
                   echo "FAIL: $bin not found"
                   exit 1
