@@ -20,6 +20,38 @@ and distribution pipeline at this repository.
 Upstream authorship is unchanged and credited in the image's
 `org.opencontainers.image.authors` label.
 
+### 🐛 HA Smart Context was writing where Claude never looks
+`ha-context` generated its summary at `$HOME/CLAUDE.md`. Claude Code reads user
+memory from `~/.claude/CLAUDE.md` and project memory from `./CLAUDE.md` upward
+from the working directory — `$HOME/CLAUDE.md` is neither, so with
+`ha_smart_context: true` the file was generated on every boot and never read.
+It now writes `$HOME/.claude/CLAUDE.md`, so Claude actually knows your setup.
+
+### ✨ Terminal no longer vanishes when Claude exits
+Exiting Claude (`/exit`, Ctrl-D, or a crash) ended the tmux session, so the
+browser panel went blank and took any error message with it. The launcher now
+runs Claude as a child and drops you back to a shell afterwards, keeping the
+scrollback and telling you the exit status.
+
+### 🧹 `data-gc` for reclaiming /data
+`/data` grows without bound: uv's wheel cache, uv's managed CPython, and a new
+Claude version directory on every self-update. `data-gc` reports what is using
+space and `data-gc clean` prunes caches and superseded versions. Credentials and
+session history are never touched.
+
+### ⚡ ha-mcp installed once instead of resolved per session
+`uvx` re-resolved ha-mcp against the index on every MCP start, so a slow or
+unreachable PyPI could delay or break Home Assistant tools on an add-on that
+worked yesterday. It is now installed once into a persistent uv tool
+environment.
+
+### 🔧 Smaller footprint and phone-friendly terminal
+tmux scrollback drops from 50,000 to 10,000 lines per pane — still five times
+the tmux default, and considerably less resident memory on a Raspberry Pi — plus
+status-bar and resize tuning for small screens. The bundled Claude Code version
+can now be pinned at build time via a `CLAUDE_VERSION` build argument, making a
+given source tree reproduce a byte-stable image.
+
 ### 🐙 GitHub built in
 The [GitHub CLI](https://cli.github.com/) (`gh`) now ships in the image, so
 Claude can manage your repositories — issues, pull requests, releases, Actions
