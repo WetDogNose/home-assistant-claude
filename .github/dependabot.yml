@@ -1,5 +1,19 @@
 version: 2
 
+# NOTE ON AUTO-MERGE: do not add it here yet, however tempting.
+#
+# The obvious way to silence Dependabot is to auto-merge anything with green
+# checks. That would have merged PR #6, which bumped home-assistant/builder to
+# a version whose image was never published -- breaking every future release.
+# Every check on that PR was green, because publish-images.yml only runs on
+# v* tags and so was never exercised.
+#
+# Green CI here does not mean "verified". Three workflow paths have no PR
+# coverage at all -- publish-images (tags only), release (tags only), and the
+# SARIF upload (continue-on-error) -- so a bump touching only those merges
+# green while proving nothing. Auto-merge becomes safe once those paths are
+# covered, and not before.
+
 updates:
   # GitHub Actions are pinned to mutable major tags (@v4, @v6). A tag can be
   # repointed by whoever controls the action, so the pin proves nothing about
@@ -9,20 +23,25 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "ci"
     labels:
       - dependencies
     groups:
-      # One PR for routine action bumps rather than five; security updates are
-      # still raised individually and immediately.
+      # Group EVERYTHING, majors included. Restricting the group to
+      # minor/patch is what produced eight separate PRs in one afternoon:
+      # every major arrived on its own branch, and because the workflows share
+      # files, each merge pushed the rest BEHIND under strict branch
+      # protection, so each one needed its own update-and-recheck cycle.
+      # One PR per month, reviewed once, is both quieter and cheaper in CI.
+      #
+      # Security updates are exempt from grouping and from the schedule --
+      # Dependabot still raises those individually and immediately.
       actions:
         patterns: ["*"]
-        update-types: [minor, patch]
     ignore:
       # home-assistant/builder is pinned to 2026.02.1 on purpose. Later tags
       # exist in git but their builder images were never published to ghcr.io
@@ -44,10 +63,9 @@ updates:
   - package-ecosystem: docker
     directory: "/claude-terminal"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "build"
     labels:
