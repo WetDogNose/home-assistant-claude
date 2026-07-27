@@ -2,7 +2,18 @@ ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 # All runtime packages are baked into the image so startup never depends on
-# the network (ttyd/tmux/jq were previously apk-installed on every boot)
+# the network (ttyd/tmux/jq were previously apk-installed on every boot).
+#
+# py3-aiohttp, py3-beautifulsoup4, py3-requests and py3-yaml were removed: no
+# script in the add-on imports any of them, and ha-mcp runs on uv's own managed
+# CPython 3.13 rather than the system interpreter, so nothing here depended on
+# them. Anyone who wants them back has persist-install.
+#
+# nodejs, npm, yq and python3 are deliberately KEPT even though the add-on
+# itself no longer needs them (Claude Code is a native musl binary). This is a
+# coding terminal attached to a Home Assistant configuration directory: yq
+# edits YAML, and a JS project that cannot run npm would be a confusing
+# regression to save ~50MB.
 RUN apk add --no-cache \
     bash \
     curl \
@@ -12,11 +23,7 @@ RUN apk add --no-cache \
     nano \
     nodejs \
     npm \
-    py3-aiohttp \
-    py3-beautifulsoup4 \
     py3-pip \
-    py3-requests \
-    py3-yaml \
     python3 \
     tmux \
     tree \
