@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Same single source of truth as build-test.yml -- scanning a different
       # base than the one that ships would make these results meaningless.
