@@ -59,7 +59,7 @@ jobs:
         # red X on an Alpine branch we have not adopted would train us to
         # ignore this workflow's status entirely.
         continue-on-error: ${{ matrix.lane == 'latest' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./claude-terminal
           push: false
