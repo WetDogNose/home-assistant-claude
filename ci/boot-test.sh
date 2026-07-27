@@ -65,7 +65,30 @@ if [ "$listening" -eq 1 ]; then
   else echo "FAIL: identity -> HTTP $code (expected 200)"; rc=1; fi
 fi
 
-echo "== 4. boot path logged no fatal error =="
+# The container's OWN healthcheck must pass, not just our probe. These are
+# different requests: ours sends the ingress identity, the HEALTHCHECK is
+# whatever the Dockerfile says. When ttyd began requiring the header and the
+# HEALTHCHECK did not send it, every assertion below still passed while the
+# Supervisor saw an app that never became healthy and restarted it forever.
+echo "== 4. container reports HEALTHY (not just serving) =="
+health="none"
+for i in $(seq 1 60); do
+  health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$NAME" 2>/dev/null || echo none)
+  case "$health" in
+    healthy)   echo "OK: healthy after ${i}s"; break ;;
+    unhealthy) echo "FAIL: reported unhealthy"; rc=1; break ;;
+  esac
+  sleep 1
+done
+if [ "$health" = "none" ]; then
+  echo "FAIL: image declares no HEALTHCHECK, so the Supervisor can never detect a dead terminal"; rc=1
+elif [ "$health" != "healthy" ] && [ "$health" != "unhealthy" ]; then
+  echo "FAIL: still '$health' after 60s"
+  docker inspect -f '{{range .State.Health.Log}}{{.Output}}{{end}}' "$NAME" 2>/dev/null | tail -5
+  rc=1
+fi
+
+echo "== 5. boot path logged no fatal error =="
 if docker logs "$NAME" 2>&1 | grep -iE '^\[[0-9:]+\] FATAL|command not found|No such file or directory' | head -5; then
   echo "FAIL: errors in the boot log (above)"; rc=1
 else
