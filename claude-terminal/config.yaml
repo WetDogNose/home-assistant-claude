@@ -146,7 +146,20 @@ map:
 # docker-default. The profile stays permissive INSIDE the container -- it must,
 # the add-on is a shell -- and denies container-escape primitives instead.
 # Also worth +1 on the Supervisor security rating.
-apparmor: claude_terminal_wdn
+#
+# This MUST be a boolean, despite the documentation describing a string form
+# ("you can also use custom profiles with the name of the profile"). The
+# Supervisor validates it as vol.Boolean(), so a profile name here fails the
+# whole file:
+#   Can't read config.yaml: expected boolean for dictionary value
+#   @ data['apparmor']. Got 'claude_terminal_wdn'
+# and a config that fails to parse is skipped silently -- the add-on simply
+# never appears in the store.
+#
+# The custom profile is picked up from claude-terminal/apparmor.txt on its own;
+# the Supervisor installs it under the add-on slug, which is why the profile in
+# that file is declared as `profile claude_terminal_wdn`.
+apparmor: true
 
 # API access for Home Assistant integration.
 #
