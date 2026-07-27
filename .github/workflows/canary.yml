@@ -1,0 +1,130 @@
+name: Canary
+
+# Floating dependencies mean the build can break with ZERO changes to this
+# repository: a new apk package, a new Claude release, a new uv, or Alpine
+# cutting a branch and moving the :latest tag. Publishing is tag-driven, so
+# without this the first execution of that breakage would be a release build.
+#
+# Two lanes:
+#   pinned  — build exactly what a release would build today. Red here means
+#             "your next release is already broken", and it is actionable now.
+#   latest  — build against ghcr.io/home-assistant/{arch}-base:latest, i.e. the
+#             Alpine branch you have NOT adopted. Red here is early warning of
+#             what adopting the next branch would cost; it must not be treated
+#             as urgent, which is why it does not fail the workflow.
+
+on:
+  schedule:
+    # Daily. Upstream moves faster than the weekly security scan.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Canary (${{ matrix.arch }}, ${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, aarch64]
+        lane: [pinned, latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve base image for this lane
+        id: base
+        run: |
+          pinned=$(yq -r '.build_from."${{ matrix.arch }}"' claude-terminal/build.yaml)
+          if [ "${{ matrix.lane }}" = "latest" ]; then
+            image="${pinned%:*}:latest"
+          else
+            image="$pinned"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Lane ${{ matrix.lane }} -> $image"
+
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (no cache, always re-pull)
+        id: build
+        # continue-on-error only on the latest lane: it is informational, and a
+        # red X on an Alpine branch we have not adopted would train us to
+        # ignore this workflow's status entirely.
+        continue-on-error: ${{ matrix.lane == 'latest' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./claude-terminal
+          push: false
+          load: true
+          provenance: false
+          no-cache: true
+          pull: true
+          platforms: ${{ matrix.arch == 'amd64' && 'linux/amd64' || 'linux/arm64' }}
+          tags: canary/claude-terminal:${{ matrix.arch }}-${{ matrix.lane }}
+          build-args: |
+            BUILD_FROM=${{ steps.base.outputs.image }}
+
+      - name: Relocations resolve
+        if: steps.build.outcome == 'success'
+        continue-on-error: ${{ matrix.lane == 'latest' }}
+        run: |
+          docker run --rm -i --entrypoint /bin/bash \
+            canary/claude-terminal:${{ matrix.arch }}-${{ matrix.lane }} -s <<'SMOKE'
+          rc=0
+          for bin in claude gh ttyd tmux node jq curl uv git; do
+            p=$(command -v "$bin") || { echo "FAIL: $bin not found"; rc=1; continue; }
+            out=$(ldd "$p" 2>&1 || true)
+            if printf '%s' "$out" | grep -q 'symbol not found'; then
+              echo "FAIL: $bin has unresolved symbols:"
+              printf '%s\n' "$out" | grep 'symbol not found'
+              rc=1
+            else
+              echo "OK(ldd): $bin"
+            fi
+          done
+          exit $rc
+          SMOKE
+
+      - name: Binaries run (native arch only)
+        if: matrix.arch == 'amd64' && steps.build.outcome == 'success'
+        continue-on-error: ${{ matrix.lane == 'latest' }}
+        run: |
+          docker run --rm -i --entrypoint /bin/bash \
+            canary/claude-terminal:amd64-${{ matrix.lane }} -s <<'SMOKE'
+          rc=0
+          for probe in "claude --version" "gh --version" "uv --version" \
+                       "node --version" "git --version" "tmux -V" \
+                       "python3 --version" "yq --version"; do
+            if out=$(timeout 30 $probe 2>&1); then
+              echo "OK: $probe -> $(printf '%s' "$out" | head -1)"
+            else
+              echo "FAIL: $probe -> $(printf '%s' "$out" | head -3)"
+              rc=1
+            fi
+          done
+          exit $rc
+          SMOKE
+
+      - name: Report what floated
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          {
+            echo "## ${{ matrix.arch }} / ${{ matrix.lane }} — \`${{ steps.base.outputs.image }}\`"
+            echo ""
+            echo '```'
+            docker run --rm -i --entrypoint /bin/bash \
+              canary/claude-terminal:${{ matrix.arch }}-${{ matrix.lane }} -s <<'SMOKE' || true
+          cat /usr/local/share/claude-terminal/build-versions.json 2>/dev/null || echo '{}'
+          echo "alpine: $(cat /etc/alpine-release)"
+          apk info -v 2>/dev/null | sort | grep -E '^(git|github-cli|nodejs|tmux|ttyd|python3|yq-go)-[0-9]' || true
+          SMOKE
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

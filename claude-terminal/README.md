@@ -71,6 +71,7 @@ Works out of the box. All options:
 |--------|---------|-------------|
 | `auto_launch_claude` | `true` | Start Claude on terminal open; `false` gives you a shell |
 | `claude_auto_update` | `true` | Keep Claude Code updated automatically |
+| `claude_version` | `""` | Pin Claude Code (`stable`, `latest`, or `X.Y.Z`); empty tracks newest |
 | `dangerously_skip_permissions` | `false` | Skip Claude's confirmation prompts (see security note in [DOCS](DOCS.md)) |
 | `claude_extra_args` | `""` | Extra flags for every Claude launch |
 | `ha_smart_context` | `true` | Generate HA context file for Claude |

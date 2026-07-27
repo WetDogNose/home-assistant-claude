@@ -111,7 +111,8 @@ setup_commands() {
         "ha-context:/opt/scripts/ha-context.sh" \
         "claude-doctor:/opt/scripts/health-check.sh" \
         "claude-login-url:/opt/scripts/claude-login-url.sh" \
-        "github-setup:/opt/scripts/github-setup.sh"; do
+        "github-setup:/opt/scripts/github-setup.sh" \
+        "claude-launch:/opt/scripts/claude-launch.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -161,6 +162,32 @@ ensure_native_claude_usable() {
     return 1
 }
 
+# Optional Claude Code version pin.
+#
+# This is the user-facing escape hatch for the one dependency that cannot be
+# tested ahead of time: Claude Code re-installs itself from the network on
+# every boot, weeks after any image was built, so no CI check observes it. When
+# an upstream release cannot run in this image, pinning turns that from "wait
+# for a new add-on release" into a configuration change.
+#
+# The official installer takes [stable|latest|VERSION]; validate before passing
+# it through so a typo becomes a warning rather than a silently failed install.
+claude_version_pin() {
+    local pin
+    pin=$(bashio::config 'claude_version' '')
+
+    if [ -z "$pin" ] || [ "$pin" = "null" ]; then
+        return 1
+    fi
+
+    if ! echo "$pin" | grep -qE '^(stable|latest|[0-9]+\.[0-9]+\.[0-9]+([^[:space:]]*)?)$'; then
+        bashio::log.warning "Ignoring invalid claude_version '${pin}' (expected: stable, latest, or X.Y.Z)"
+        return 1
+    fi
+
+    echo "$pin"
+}
+
 update_claude() {
     # Always neutralise a broken persistent install first, even when
     # auto-update is off, so it can't keep shadowing the bundled copy.
@@ -175,6 +202,26 @@ update_claude() {
         else
             bashio::log.info "Claude auto-update disabled; using bundled Claude Code"
         fi
+        return 0
+    fi
+
+    # A pin means "install exactly this", so skip `claude update` entirely --
+    # updating would immediately move off the version the user pinned to.
+    local pin=""
+    pin=$(claude_version_pin) || pin=""
+    if [ -n "$pin" ]; then
+        bashio::log.info "Installing pinned Claude Code ${pin} into /data (background)..."
+        (
+            if curl -fsSL --connect-timeout 10 https://claude.ai/install.sh | bash -s -- "$pin" >/dev/null 2>&1 \
+                && [ -x "$HOME/.local/bin/claude" ] && native_claude_runs; then
+                bashio::log.info "Pinned Claude Code installed: $("$HOME/.local/bin/claude" --version 2>/dev/null || echo "${pin}")"
+            else
+                # Same rule as the unpinned path: never leave a binary that
+                # cannot run shadowing the bundled copy on PATH.
+                rm -f "$HOME/.local/bin/claude"
+                bashio::log.warning "Pinned Claude Code ${pin} unavailable or unrunnable; using bundled copy"
+            fi
+        ) &
         return 0
     fi
 
@@ -345,8 +392,13 @@ get_claude_launch_command() {
 
     if [ "$(bashio::config 'auto_launch_claude' 'true')" = "true" ]; then
         # tmux -A attaches to the live session on browser reconnects and HA
-        # navigation instead of stacking new ones
-        echo "tmux new-session -A -s claude 'claude${flags:+ $flags}'"
+        # navigation instead of stacking new ones.
+        # claude-launch rather than claude: ttyd resolves this command on every
+        # connection, so a binary broken by a background self-update after boot
+        # would otherwise kill the tmux session instantly (the 2.5.1 symptom).
+        # The wrapper probes, falls back to the bundled copy, and degrades to a
+        # shell with an explanation rather than vanishing.
+        echo "tmux new-session -A -s claude 'claude-launch${flags:+ $flags}'"
     else
         # Shell mode: banner + interactive bash, still inside tmux for
         # reconnect persistence. Run 'claude' manually when ready.

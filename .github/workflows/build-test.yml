@@ -88,6 +88,7 @@ jobs:
             /opt/scripts/persist-install.sh \
             /opt/scripts/ha-context.sh \
             /opt/scripts/github-setup.sh \
+            /opt/scripts/claude-launch.sh \
             /opt/scripts/welcome.sh; do
             if [ -x "$script" ]; then echo "OK: $script"; else
               echo "FAIL: $script is not executable"; rc=1
