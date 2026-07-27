@@ -1,0 +1,50 @@
+#include <tunables/global>
+
+# AppArmor profile for the Claude Terminal add-on.
+#
+# The goal is NOT to constrain what the agent does inside the container -- it
+# must run apk, pip, uv, node, git and whatever the user asks for, so any
+# attempt to whitelist its behaviour would either break it or be theatre.
+#
+# The goal is to remove container-ESCAPE primitives it provably never needs.
+# Home Assistant disables seccomp for every add-on, so without this profile the
+# only mandatory access control is Docker's generic docker-default -- for a
+# container running an LLM as root. Shipping this also raises the Supervisor
+# security rating from 6/8 to 7/8.
+profile claude_terminal_wdn flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Broad in-container permission: the add-on is a shell, and pretending
+  # otherwise would just produce a profile nobody can keep working.
+  file,
+  umount,
+  signal,
+  ptrace peer=@{profile_name},
+  network,
+
+  # --- Escape primitives, denied -------------------------------------------
+  # Writing to the host's kernel interfaces or re-mounting the filesystem are
+  # the classic paths out of a container. None of them appear anywhere in
+  # run.sh, the helper scripts, or normal Claude Code operation.
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny @{PROC}/kmem rwklx,
+  deny @{PROC}/mem rwklx,
+  deny @{PROC}/sys/kernel/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+  deny /sys/fs/cgroup/** wklx,
+  deny mount,
+  deny /dev/kmsg rwklx,
+
+  # Loading kernel modules or rebooting the host is never legitimate here.
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny capability sys_boot,
+  deny capability mac_admin,
+  deny capability mac_override,
+
+  # Docker socket access would let the container control its own host daemon.
+  deny /var/run/docker.sock rwklx,
+  deny /run/docker.sock rwklx,
+}

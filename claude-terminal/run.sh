@@ -407,6 +407,28 @@ get_claude_launch_command() {
     fi
 }
 
+# Background provisioning. Writes a sentinel so claude-launch can tell the
+# difference between "still working" and "finished", and records a reason on
+# failure so the terminal can explain itself instead of silently lacking tools.
+PROVISION_DIR="/run/claude-terminal"
+
+provision_async() {
+    mkdir -p "$PROVISION_DIR"
+    rm -f "$PROVISION_DIR/provisioned" "$PROVISION_DIR/failed"
+
+    local failed=""
+    install_persistent_packages || failed="package installation"
+    setup_ha_mcp                || failed="${failed:+$failed, }ha-mcp setup"
+    generate_ha_context         || failed="${failed:+$failed, }HA context"
+
+    if [ -n "$failed" ]; then
+        echo "$failed" > "$PROVISION_DIR/failed"
+        bashio::log.warning "Background provisioning had problems: ${failed}"
+    fi
+    : > "$PROVISION_DIR/provisioned"
+    bashio::log.info "Background provisioning complete"
+}
+
 # Start main web terminal
 start_web_terminal() {
     local port=7681
@@ -430,12 +452,48 @@ start_web_terminal() {
     # Terminal theme - dark palette with terracotta accents (#d97757)
     local ttyd_theme='{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#d97757","cursorAccent":"#1a1b26","selectionBackground":"#33467c","selectionForeground":"#c0caf5","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
 
+    # Require the identity the Supervisor's ingress proxy already injects.
+    #
+    # panel_admin only hides the sidebar entry -- it is NOT access control, so
+    # without this any authenticated Home Assistant user can mint an ingress
+    # session and land on a root shell, and any co-resident add-on can reach
+    # ttyd directly on the container network. ttyd answers 407 when the header
+    # is absent, and applies the same check to the WebSocket upgrade, so the
+    # data path cannot be opened around the HTTP gate.
+    #
+    # The dev escape hatch is deliberately gated on SUPERVISOR_TOKEN being
+    # unset, so it can never disable enforcement inside a real add-on.
+    # FAIL CLOSED. bashio::config returns empty when it cannot reach the
+    # Supervisor API, so testing for "= true" meant a transient API failure
+    # silently dropped authentication on a running add-on. Only an explicit
+    # "false" disables it; anything else -- including an unreadable config --
+    # enforces. Caught by ci/boot-test.sh, which saw HTTP 200 with no identity.
+    local require_user auth_args=()
+    require_user=$(bashio::config 'require_ingress_user' 'true' 2>/dev/null) || require_user="true"
+    [ -z "$require_user" ] || [ "$require_user" = "null" ] && require_user="true"
+
+    if [ "$require_user" != "false" ]; then
+        auth_args=(--auth-header "X-Remote-User-Id")
+        bashio::log.info "Ingress identity enforcement ON (set require_ingress_user: false if the terminal will not connect)"
+    elif [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+        bashio::log.warning "=========================================================="
+        bashio::log.warning "require_ingress_user is DISABLED."
+        bashio::log.warning "Any Home Assistant user, including non-admins, can reach"
+        bashio::log.warning "this terminal as root."
+        bashio::log.warning "=========================================================="
+    else
+        # Local development only, and only when explicitly asked for: a missing
+        # SUPERVISOR_TOKEN alone must never be enough to disable the gate.
+        bashio::log.warning "require_ingress_user is false and there is no Supervisor: enforcement off (local development)"
+    fi
+
     # Run ttyd with keepalive configuration to prevent WebSocket disconnects
     # See: https://github.com/heytcass/home-assistant-addons/issues/24
     exec ttyd \
         --port "${port}" \
         --interface 0.0.0.0 \
         --writable \
+        ${auth_args[@]+"${auth_args[@]}"} \
         --ping-interval 30 \
         --client-option enableReconnect=true \
         --client-option reconnect=10 \
@@ -463,10 +521,22 @@ main() {
     init_environment
     setup_commands
     update_claude
-    install_persistent_packages
     configure_git
-    generate_ha_context
-    setup_ha_mcp
+
+    # Everything below this line used to run in the FOREGROUND before
+    # exec ttyd: apk/pip installs with no timeout, and two cold starts of a
+    # ~269MB binary for the MCP registration. On a Pi with persistent packages
+    # configured, port 7681 stayed closed for a minute or more while the
+    # Supervisor had already reported the add-on STARTED. That contradicts this
+    # file's own rule (see the header) that nothing on the boot path may block.
+    #
+    # Serialised inside one subshell rather than three independent background
+    # jobs: apk and pip must not race, and setup_ha_mcp needs a settled
+    # environment. claude-launch waits on the sentinel with a bounded timeout,
+    # so a wedged install degrades to "no MCP this session" rather than to a
+    # terminal that never opens.
+    provision_async &
+
     start_web_terminal
 }
 

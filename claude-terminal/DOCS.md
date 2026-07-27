@@ -66,6 +66,7 @@ Your credentials are stored under `/data` and persist across restarts and add-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `auto_launch_claude` | `true` | Start Claude immediately when the terminal opens. Set to `false` to get a shell instead (run `claude` yourself). |
+| `require_ingress_user` | `true` | Only open the terminal for a signed-in Home Assistant user. **Leave this on** — see Security notes. Turn off only if the terminal never finishes loading. |
 | `claude_auto_update` | `true` | Keep Claude Code current: installs the official native build into `/data` and updates it in the background on each startup. |
 | `claude_version` | `""` | Pin Claude Code to `stable`, `latest`, or an exact `X.Y.Z`. Empty tracks the newest release. Use this if an upstream release will not run in this add-on — see below. |
 | `dangerously_skip_permissions` | `false` | Launch Claude with `--dangerously-skip-permissions` (no confirmation prompts). **Read the security note below.** |
@@ -178,6 +179,7 @@ Read this before signing in — it grants real access.
 ## Troubleshooting
 
 - **Can't copy the OAuth login URL / "Authorization failed – Invalid request format"**: the browser terminal's clipboard path truncates very long payloads, and the login URL is one — a cut-off `state` parameter causes exactly that authorization error. Reliable path: while the login prompt is showing, open a second tmux window (`Ctrl+B` then `C`), run `claude-login-url`, and open `/config/claude-login-url.txt` with the File Editor add-on (or over Samba) — copy the URL from there. Switch back with `Ctrl+B` then `L` to paste the resulting code. Delete the file when done. Don't click the link in the terminal directly: link detection truncates URLs that wrap across lines.
+- **Terminal never finishes loading / stays blank with no prompt**: if this started after an update, your Home Assistant may not be passing the signed-in user through to add-ons. Set `require_ingress_user: false` in the add-on configuration and restart. Please report it if that fixes it.
 - **Terminal opens blank or closes instantly**: this means Claude Code could not start. The add-on now detects that at launch and drops you to a shell with an explanation instead of a blank screen, so run `claude-doctor` there — it reports each installed copy and whether it actually runs. The usual cause is an update pulling a build incompatible with this image; `rm -f ~/.local/bin/claude` and restart to fall back to the bundled copy, then set `claude_version` to a known-good `X.Y.Z` so the next update does not reintroduce it.
 - **Claude exits immediately or behaves oddly**: restart the add-on so the background auto-updater can fetch the latest Claude Code; check the add-on log for update messages.
 - **Diagnostics**: run `claude-doctor` in the terminal for connectivity, memory, and environment checks.
