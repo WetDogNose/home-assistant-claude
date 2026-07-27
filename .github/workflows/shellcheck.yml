@@ -1,7 +1,15 @@
 name: ShellCheck
 
+# Pushes to main are linted too -- see the note in build-test.yml: nothing else
+# gates a commit that lands on main without a PR.
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - "claude-terminal/**/*.sh"
+      - "claude-terminal/run.sh"
+      - ".github/workflows/shellcheck.yml"
+  push:
     branches: [main]
     paths:
       - "claude-terminal/**/*.sh"

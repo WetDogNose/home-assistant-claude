@@ -1,7 +1,16 @@
 name: Build & Smoke Test
 
+# Runs on pushes to main as well as PRs. Publishing is tag-driven, so without
+# the push trigger a commit landing directly on main is never built, and the
+# first build would happen at release time -- where a failure means a failed
+# release. The path filters keep docs-only pushes from building anything.
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - "claude-terminal/**"
+      - ".github/workflows/build-test.yml"
+  push:
     branches: [main]
     paths:
       - "claude-terminal/**"

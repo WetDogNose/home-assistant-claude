@@ -7,6 +7,15 @@ on:
       - "claude-terminal/Dockerfile"
       - "claude-terminal/run.sh"
       - ".github/workflows/security-scan.yml"
+  # Also scan pushes to main: without this, a Dockerfile change landing
+  # directly on main goes unscanned until the weekly cron, which can be six
+  # days later -- and a release could ship in between.
+  push:
+    branches: [main]
+    paths:
+      - "claude-terminal/Dockerfile"
+      - "claude-terminal/run.sh"
+      - ".github/workflows/security-scan.yml"
   schedule:
     # Weekly scan to catch newly disclosed CVEs
     - cron: "23 7 * * 1"
