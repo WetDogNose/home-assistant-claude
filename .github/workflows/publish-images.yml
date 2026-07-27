@@ -40,7 +40,7 @@ jobs:
         # was dropped upstream); armv7 installs keep building locally
         arch: [aarch64, amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
