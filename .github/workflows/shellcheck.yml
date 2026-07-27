@@ -10,6 +10,12 @@ on:
   push:
     branches: [main]
 
+# Cancel superseded runs: pushing twice to a PR should not leave the first
+# build burning minutes on a commit nobody will merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   shellcheck:
     name: Lint shell scripts

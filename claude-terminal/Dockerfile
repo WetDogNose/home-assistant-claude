@@ -51,12 +51,19 @@ SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 # than via `npm install -g`: the npm package is now only a wrapper that
 # installs this same binary, and running npm/Node during aarch64 cross-builds
 # (QEMU on CI runners) crashes V8 with SIGILL. curl+tar emulate fine.
+# Bundled Claude Code version. Empty keeps the current behaviour (resolve
+# "latest" at build time). Setting an exact X.Y.Z makes the image byte-stable
+# for a given source tree, which is what lets a rebuild reproduce a shipped
+# image and lets a release pin away from a known-bad upstream build.
+ARG CLAUDE_VERSION=""
+
 RUN case "$(apk --print-arch)" in \
         x86_64)  claude_pkg="linux-x64-musl" ;; \
         aarch64) claude_pkg="linux-arm64-musl" ;; \
         *) echo "Unsupported architecture: $(apk --print-arch)" >&2; exit 1 ;; \
     esac \
-    && claude_version="$(curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-code/latest | jq -r .version)" \
+    && claude_version="${CLAUDE_VERSION:-$(curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-code/latest | jq -r .version)}" \
+    && echo "Bundling Claude Code ${claude_version}" \
     && curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code-${claude_pkg}/-/claude-code-${claude_pkg}-${claude_version}.tgz" \
         | tar -xz -C /tmp package/claude \
     && install -m 0755 /tmp/package/claude /usr/local/bin/claude \

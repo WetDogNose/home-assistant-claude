@@ -112,7 +112,8 @@ setup_commands() {
         "claude-doctor:/opt/scripts/health-check.sh" \
         "claude-login-url:/opt/scripts/claude-login-url.sh" \
         "github-setup:/opt/scripts/github-setup.sh" \
-        "claude-launch:/opt/scripts/claude-launch.sh"; do
+        "claude-launch:/opt/scripts/claude-launch.sh" \
+        "data-gc:/opt/scripts/data-gc.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then

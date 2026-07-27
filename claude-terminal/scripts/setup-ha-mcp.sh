@@ -46,12 +46,20 @@ configure_ha_mcp_server() {
         -- uvx --python 3.13 --index-strategy unsafe-best-match "ha-mcp@${version}"; then
         bashio::log.info "ha-mcp ${version} configured for Claude Code"
 
-        # Pre-warm the uv environment in the background (managed Python
-        # download + dependency resolution) so the first MCP connection
-        # doesn't hit the client startup timeout
-        (uvx --python 3.13 --index-strategy unsafe-best-match \
-            --from "ha-mcp@${version}" python -c "" >/dev/null 2>&1 || true) &
-        bashio::log.info "Pre-warming ha-mcp environment in background"
+        # Install ha-mcp once into a persistent uv tool environment rather
+        # than leaving uvx to resolve it on every MCP start. uvx re-checks the
+        # index each session, so a slow or unreachable PyPI delays or breaks
+        # the Home Assistant tools on an add-on that was working yesterday.
+        # The tool environment lives under XDG_DATA_HOME (/data), so it
+        # survives restarts; backup_exclude keeps it out of backups.
+        (
+            uv tool install --python 3.13 --index-strategy unsafe-best-match \
+                "ha-mcp@${version}" >/dev/null 2>&1 \
+                || uvx --python 3.13 --index-strategy unsafe-best-match \
+                    --from "ha-mcp@${version}" python -c "" >/dev/null 2>&1 \
+                || true
+        ) &
+        bashio::log.info "Provisioning ha-mcp environment in background"
     else
         bashio::log.warning "Failed to configure ha-mcp - continuing without MCP integration"
         bashio::log.warning "You can manually run: claude mcp add home-assistant --env HOMEASSISTANT_URL=http://supervisor/core --env HOMEASSISTANT_TOKEN=\$SUPERVISOR_TOKEN -- uvx --python 3.13 --index-strategy unsafe-best-match ha-mcp@${version}"

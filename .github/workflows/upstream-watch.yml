@@ -1,0 +1,72 @@
+name: Upstream Watch
+
+# This repository tracks heytcass/home-assistant-addons but does not auto-merge
+# from it. Without a reminder, divergence is only noticed when a conflict shows
+# up, by which point the useful fixes are buried among unrelated changes.
+#
+# Opens (or updates) a single tracking issue listing upstream commits this fork
+# does not have. One issue, edited in place -- not one per commit.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Check upstream for new commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compare against upstream
+        id: diff
+        run: |
+          git remote add upstream https://github.com/heytcass/home-assistant-addons.git || true
+          git fetch -q upstream main
+          count=$(git rev-list --count HEAD..upstream/main)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          {
+            echo "Upstream commits not present in this fork: **${count}**"
+            echo ""
+            if [ "$count" -gt 0 ]; then
+              echo "| Commit | Subject |"
+              echo "|---|---|"
+              git log --format='| [`%h`](https://github.com/heytcass/home-assistant-addons/commit/%H) | %s |' \
+                HEAD..upstream/main | head -40
+              echo ""
+              echo "Review with:"
+              echo '```'
+              echo "git fetch upstream && git log --oneline HEAD..upstream/main"
+              echo '```'
+            else
+              echo "Nothing to review."
+            fi
+          } > body.md
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the tracking issue
+        if: steps.diff.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Upstream has ${{ steps.diff.outputs.count }} commit(s) worth reviewing"
+          existing=$(gh issue list --search "Upstream has in:title" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body-file body.md
+            echo "Updated issue #${existing}"
+          else
+            gh issue create --title "$title" --body-file body.md \
+              --label enhancement --label documentation
+          fi
