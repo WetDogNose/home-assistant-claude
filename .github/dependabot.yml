@@ -23,6 +23,19 @@ updates:
       actions:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # home-assistant/builder is pinned to 2026.02.1 on purpose. Later tags
+      # exist in git but their builder images were never published to ghcr.io
+      # -- 2026.06.0 still returns HTTP 404, and pulling it fails with
+      # "manifest unknown", which is what broke every publish job and prompted
+      # the pin in 9008b35.
+      #
+      # This is exactly the bump CI cannot catch: publish-images.yml runs only
+      # on v* tags, so the first execution of a bad builder version would be a
+      # release. Unignore only after confirming the image exists:
+      #   curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" \
+      #     https://ghcr.io/v2/home-assistant/amd64-builder/manifests/<version>
+      - dependency-name: home-assistant/builder
 
   # The base image is declared in claude-terminal/build.yaml rather than a
   # FROM line, so Dockerfile ecosystem support cannot see it -- the daily
