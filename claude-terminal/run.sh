@@ -189,6 +189,74 @@ claude_version_pin() {
     echo "$pin"
 }
 
+
+# Install the native Claude Code build WITHOUT piping a remote script into a
+# root shell.
+#
+# The previous approach ran `curl -fsSL https://claude.ai/install.sh | bash` as
+# root on every boot: unauthenticated-to-us remote code, executed with full
+# privileges, on a schedule, on an appliance that also holds Home Assistant
+# credentials. Nothing about the add-on required that -- the installer's real
+# job is to fetch a platform tarball, which is four lines of curl and tar, and
+# is exactly what the Dockerfile already does for the bundled copy.
+#
+# Fetching directly also lets us verify BEFORE the binary reaches PATH: check
+# relocations resolve and that it actually runs, rather than discovering both
+# when the terminal dies.
+install_claude_native() {
+    local want="$1" pkg version tmp current
+
+    case "$(apk --print-arch)" in
+        x86_64)  pkg="linux-x64-musl" ;;
+        aarch64) pkg="linux-arm64-musl" ;;
+        *) bashio::log.warning "No native Claude build for $(apk --print-arch)"; return 1 ;;
+    esac
+
+    if [ -z "$want" ] || [ "$want" = "latest" ] || [ "$want" = "stable" ]; then
+        version=$(curl -fsSL --connect-timeout 10 \
+            https://registry.npmjs.org/@anthropic-ai/claude-code/latest 2>/dev/null \
+            | jq -r .version 2>/dev/null)
+    else
+        version="$want"
+    fi
+    if [ -z "$version" ] || [ "$version" = "null" ]; then
+        bashio::log.warning "Could not determine a Claude Code version to install"
+        return 1
+    fi
+
+    # Skip the ~85MB download when the wanted version is already in place.
+    if [ -x "$HOME/.local/bin/claude" ]; then
+        current=$(timeout 10 "$HOME/.local/bin/claude" --version 2>/dev/null | awk '{print $1}')
+        if [ "$current" = "$version" ]; then
+            bashio::log.info "Claude Code ${version} already installed"
+            return 0
+        fi
+    fi
+
+    tmp=$(mktemp -d) || return 1
+    if ! curl -fsSL --connect-timeout 10 \
+        "https://registry.npmjs.org/@anthropic-ai/claude-code-${pkg}/-/claude-code-${pkg}-${version}.tgz" \
+        2>/dev/null | tar -xz -C "$tmp" package/claude 2>/dev/null; then
+        bashio::log.warning "Download of Claude Code ${version} failed"
+        rm -rf "$tmp"; return 1
+    fi
+    chmod 0755 "$tmp/package/claude"
+
+    # Verify before it can shadow the bundled copy on PATH: a binary that is
+    # present and +x but cannot relocate is exactly the 2.5.1 blank terminal.
+    if ldd "$tmp/package/claude" 2>&1 | grep -q 'symbol not found' \
+       || ! timeout 15 "$tmp/package/claude" --version >/dev/null 2>&1; then
+        bashio::log.warning "Claude Code ${version} does not run in this image; keeping the bundled copy"
+        rm -rf "$tmp"; return 1
+    fi
+
+    mkdir -p "$HOME/.local/bin"
+    mv -f "$tmp/package/claude" "$HOME/.local/bin/claude"
+    rm -rf "$tmp"
+    bashio::log.info "Claude Code ${version} installed and verified"
+    return 0
+}
+
 update_claude() {
     # Always neutralise a broken persistent install first, even when
     # auto-update is off, so it can't keep shadowing the bundled copy.
@@ -212,46 +280,20 @@ update_claude() {
     pin=$(claude_version_pin) || pin=""
     if [ -n "$pin" ]; then
         bashio::log.info "Installing pinned Claude Code ${pin} into /data (background)..."
-        (
-            if curl -fsSL --connect-timeout 10 https://claude.ai/install.sh | bash -s -- "$pin" >/dev/null 2>&1 \
-                && [ -x "$HOME/.local/bin/claude" ] && native_claude_runs; then
-                bashio::log.info "Pinned Claude Code installed: $("$HOME/.local/bin/claude" --version 2>/dev/null || echo "${pin}")"
-            else
-                # Same rule as the unpinned path: never leave a binary that
-                # cannot run shadowing the bundled copy on PATH.
-                rm -f "$HOME/.local/bin/claude"
-                bashio::log.warning "Pinned Claude Code ${pin} unavailable or unrunnable; using bundled copy"
-            fi
-        ) &
+        ( install_claude_native "$pin" || rm -f "$HOME/.local/bin/claude" ) &
         return 0
     fi
 
     if [ "$native_usable" -eq 0 ]; then
         bashio::log.info "Persistent Claude Code found; checking for updates in background"
-        (
-            "$HOME/.local/bin/claude" update >/dev/null 2>&1 || true
-            # An update can pull a build this image's libc can't run; don't
-            # let it linger on PATH for the next launch or reconnect.
-            if [ -x "$HOME/.local/bin/claude" ] && ! native_claude_runs; then
-                bashio::log.warning "Updated Claude Code no longer runs in this image; removing it and falling back to the bundled copy"
-                rm -f "$HOME/.local/bin/claude"
-            fi
-        ) &
+        # install_claude_native verifies before replacing, so a bad upstream
+        # build never lands on PATH in the first place -- no rollback needed.
+        ( install_claude_native "latest" || true ) &
         return 0
     fi
 
     bashio::log.info "Installing persistent Claude Code into /data (background)..."
-    (
-        if curl -fsSL --connect-timeout 10 https://claude.ai/install.sh | bash >/dev/null 2>&1 \
-            && [ -x "$HOME/.local/bin/claude" ] && native_claude_runs; then
-            bashio::log.info "Persistent Claude Code installed: $("$HOME/.local/bin/claude" --version 2>/dev/null || echo 'version unknown')"
-        else
-            # Don't let a freshly installed but unrunnable binary shadow the
-            # bundled copy either.
-            rm -f "$HOME/.local/bin/claude"
-            bashio::log.warning "Native Claude Code install unavailable or unrunnable; using bundled copy"
-        fi
-    ) &
+    ( install_claude_native "latest" || rm -f "$HOME/.local/bin/claude" ) &
 }
 
 # Install persistent packages from config and saved state
