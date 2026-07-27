@@ -107,8 +107,18 @@ RUN chmod +x /run.sh /opt/scripts/*.sh
 # provisioning, which never finishes. start-period covers the slowest realistic
 # boot; provisioning itself now runs in the background, so ttyd is listening
 # long before that budget expires.
+# The header is REQUIRED here. ttyd runs with --auth-header X-Remote-User-Id,
+# so a probe without it gets 401, curl -f fails, and the container never
+# reports healthy -- the Supervisor then times out at 120s and the watchdog
+# restarts it in a loop, while ttyd is in fact serving perfectly well.
+#
+# The value is irrelevant: --auth-header only requires the header to be
+# present. That is not a bypass -- this runs inside the container, which can
+# already reach everything; the header is what stops UNAUTHENTICATED callers
+# arriving through ingress or from another add-on.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD curl -fsS -o /dev/null http://127.0.0.1:7681/ || exit 1
+    CMD curl -fsS -o /dev/null -H "X-Remote-User-Id: healthcheck" \
+        http://127.0.0.1:7681/ || exit 1
 
 # Use exec form for better signal handling
 CMD ["/run.sh"]

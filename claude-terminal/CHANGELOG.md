@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.5.1-wdn.2
+
+### 🐛 Add-on failed to start (restart loop)
+2.5.1-wdn.1 would install but never finish starting: Home Assistant reported
+"Timeout while waiting for app to start", then the watchdog restarted it,
+repeatedly.
+
+Two changes in that release were mutually incompatible. The terminal began
+requiring the Home Assistant sign-in header, and the new container health check
+probed it *without* that header — so the probe got 401, the container never
+reported healthy, and the watchdog kept restarting a terminal that was in fact
+serving perfectly well the whole time.
+
+The health check now sends the header. CI additionally asserts the container
+reaches `healthy`, rather than only that the port answers — the previous test
+sent the header itself, so it passed while the real health check failed.
+
 ## 2.5.1-wdn.1
 
 First release of the WetDogNose fork of
