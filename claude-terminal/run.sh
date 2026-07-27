@@ -113,7 +113,8 @@ setup_commands() {
         "claude-login-url:/opt/scripts/claude-login-url.sh" \
         "github-setup:/opt/scripts/github-setup.sh" \
         "claude-launch:/opt/scripts/claude-launch.sh" \
-        "data-gc:/opt/scripts/data-gc.sh"; do
+        "data-gc:/opt/scripts/data-gc.sh" \
+        "ha-notify:/opt/scripts/ha-notify.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -424,6 +425,12 @@ provision_async() {
     if [ -n "$failed" ]; then
         echo "$failed" > "$PROVISION_DIR/failed"
         bashio::log.warning "Background provisioning had problems: ${failed}"
+        # The add-on log is not somewhere anyone looks until they already
+        # suspect a problem; the notification drawer is.
+        /usr/local/bin/ha-notify \
+            "Claude Terminal setup incomplete" \
+            "Some setup did not finish: ${failed}. The terminal still works, but Home Assistant tools may be unavailable. Check the add-on log for details." \
+            "claude_terminal_provision" || true
     fi
     : > "$PROVISION_DIR/provisioned"
     bashio::log.info "Background provisioning complete"

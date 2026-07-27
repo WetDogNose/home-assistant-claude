@@ -26,6 +26,21 @@ fi
 printf '%s\n' "$url" > "$OUT"
 chmod 600 "$OUT"
 
+# Also push it to Home Assistant's notification drawer, where it can be
+# selected and copied with the browser's own clipboard rather than fighting
+# the terminal's OSC 52 truncation -- which is the whole reason this script
+# has to exist.
+if [ -x /usr/local/bin/ha-notify ]; then
+    /usr/local/bin/ha-notify \
+        "Claude Terminal sign-in" \
+        "Open this URL to authorise Claude Code, then return to the terminal and paste the code:
+
+${url}
+
+Dismiss this notification once you are signed in." \
+        "claude_terminal_login" && echo "Also sent to Home Assistant notifications."
+fi
+
 echo "Login URL saved to: $OUT"
 echo "Open it with the Home Assistant File Editor (or over Samba), copy the"
 echo "whole line into your browser, and authorize. Delete the file afterwards."
