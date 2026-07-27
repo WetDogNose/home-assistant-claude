@@ -1,0 +1,101 @@
+---
+# Friendly labels for the add-on configuration page.
+#
+# Location and structure are fixed by the Supervisor: translations live in
+# <addon>/translations/<language code>.yaml and support exactly two top-level
+# keys, `configuration` and `network`.
+# https://developers.home-assistant.io/docs/add-ons/configuration
+#
+# Every key under `configuration` must match a key in config.yaml's `schema`,
+# and every key under `network` must match a key in `ports`. Keys that do not
+# match are simply ignored, so the raw option name reappears in the UI --
+# rename an option in config.yaml and you must rename it here too.
+
+configuration:
+  auto_launch_claude:
+    name: Start Claude automatically
+    description: >-
+      Opens Claude as soon as you open the terminal. Turn this off if you would
+      rather land at a plain command prompt and start Claude yourself.
+
+  claude_auto_update:
+    name: Keep Claude Code up to date
+    description: >-
+      Downloads the newest version of Claude Code in the background each time
+      the add-on starts. Turn this off to stay on the version you already have.
+
+  claude_version:
+    name: Claude Code version
+    description: >-
+      Leave empty to always use the newest release. Enter stable, latest, or an
+      exact version such as 2.0.14 to hold Claude at a known-good version if a
+      new release stops working.
+
+  dangerously_skip_permissions:
+    name: Skip confirmation prompts (unsafe)
+    description: >-
+      WARNING - this removes the step where Claude asks your permission before
+      it changes files or controls your devices; it will simply go ahead. Only
+      turn this on if you accept that anything Claude reads, including a web
+      page or someone else's file, could trigger changes you never approved.
+
+  claude_extra_args:
+    name: Extra Claude options
+    description: >-
+      Extra command-line options added every time Claude starts, for example
+      --model claude-sonnet-5. Separate options with spaces; values containing
+      spaces are not supported, even in quotes.
+
+  ha_smart_context:
+    name: Tell Claude about your Home Assistant setup
+    description: >-
+      Writes a summary of your system - version, integrations, devices and
+      entities - to a file Claude reads automatically, so you do not have to
+      explain your setup in every conversation.
+
+  enable_ha_mcp:
+    name: Let Claude control Home Assistant
+    description: >-
+      Connects Claude to Home Assistant so it can check entity states, control
+      devices, and edit automations, scripts and dashboards. Turn this off to
+      limit Claude to reading and editing files.
+
+  ha_mcp_version:
+    name: Home Assistant connection version
+    description: >-
+      Which release of the ha-mcp server is used for the Home Assistant
+      connection above. Leave this as it is unless you have a reason to change
+      it.
+
+  git_user_name:
+    name: Git author name
+    description: >-
+      The name recorded as the author of any Git commits made from the
+      terminal. Git refuses to commit without a name and an email address.
+
+  git_user_email:
+    name: Git author email
+    description: >-
+      The email address recorded as the author of any Git commits made from the
+      terminal. Git refuses to commit without a name and an email address.
+
+  persistent_apk_packages:
+    name: Extra system packages
+    description: >-
+      Alpine Linux package names, such as htop, reinstalled every time the
+      add-on starts. Anything you install by hand in the terminal is lost on
+      restart, so list it here to keep it.
+
+  persistent_pip_packages:
+    name: Extra Python packages
+    description: >-
+      Python package names reinstalled every time the add-on starts. Anything
+      you install by hand in the terminal is lost on restart, so list it here
+      to keep it.
+
+network:
+  7681/tcp: >-
+    Web terminal. Leave this empty - the terminal is already available from the
+    Home Assistant sidebar, and publishing this port puts an unprotected
+    terminal on your network for anyone who can reach it.
+

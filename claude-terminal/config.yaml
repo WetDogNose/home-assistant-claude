@@ -9,6 +9,10 @@ version: "2.5.1-wdn.1"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
+
+# Declared maturity, shown in the add-on store. This is a fork of a released
+# upstream add-on running a stable toolchain, not an experiment.
+stage: stable
 init: false
 
 # Prebuilt images on GHCR — the Supervisor pulls these instead of building
@@ -78,17 +82,80 @@ schema:
   persistent_pip_packages:
     - str
 
-# Volume mappings for file access
-map:
-  - config:rw            # Home Assistant configuration files
-  - all_addon_configs:rw # Other add-ons' config directories (/addon_configs)
-  - share:rw             # Shared folder between add-ons and HA
+# Keep reproducible artefacts out of Home Assistant backups.
+#
+# /data is backed up in full, and it accumulates a uv-managed CPython, a uv
+# wheel cache and a self-reinstalling Claude Code binary -- the same class of
+# problem as the npm cache that bloated backups by gigabytes (#103).
+#
+# Patterns are relative to the add-on's data directory (i.e. to /data), NOT
+# absolute container paths: the Supervisor matches them against the host path,
+# so a leading "/data/..." silently matches nothing. Note HOME is /data/home
+# while the XDG dirs sit at /data directly, hence the mixed prefixes below.
+#
+# Everything here is regenerated on the next boot (update_claude reinstalls
+# Claude; setup-ha-mcp re-warms the uv environment). Deliberately NOT excluded,
+# because they are irreplaceable user state: .config/claude and .config/gh
+# (credentials), home/.claude.json and home/.claude/projects (session history),
+# and persistent-packages.json. Note the exclusion is home/.claude/downloads
+# specifically, not home/.claude, so conversation history survives.
+backup_exclude:
+  - ".cache/uv"                   # uv wheel cache (XDG_CACHE_HOME=/data/.cache)
+  - ".local/share/uv/python"      # uv-managed CPython 3.13 (~150-250MB).
+                                  # Narrow: .local/share/uv would also prune
+                                  # uv/tools, i.e. user-installed tooling.
+  - ".local/share/claude"         # Claude version store, if XDG-placed
+  - "home/.local/share/claude"    # Claude version store, if HOME-placed
+  - "home/.local/bin/claude"      # symlink into the version store above
+  - "home/.claude/downloads"      # installer scratch ($HOME/.claude/downloads)
+  - "home/.npm"                   # legacy npm cache (#103)
 
-# API access for Home Assistant integration
+# Volume mappings for file access.
+#
+# `config` is deprecated in favour of `homeassistant_config`, but they mount at
+# DIFFERENT paths (/config vs /homeassistant). The explicit `path: /config`
+# keeps the historical mount, which everything depends on: WORKDIR in the
+# Dockerfile, claude-login-url.sh writing /config/claude-login-url.txt, and the
+# documented "terminal starts in /config". Without that path override this is a
+# breaking change rather than a cleanup.
+#
+# Caveat for future edits: PATH_PUBLIC_CONFIG is also /config, so adding
+# `addon_config`/`app_config` later without its own explicit path would collide
+# on the same mount point.
+#
+# all_addon_configs is itself deprecated (2026.07) in favour of all_app_configs,
+# deliberately NOT migrated: the replacement mounts at /app_configs rather than
+# /addon_configs, and on any Supervisor older than 2026.07.2 the unknown type
+# fails validation of this entire file, making the add-on unloadable.
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /config
+  - type: all_addon_configs
+    read_only: false
+  - type: share
+    read_only: false
+
+# API access for Home Assistant integration.
+#
+# auth_api is deliberately NOT granted. It unlocks exactly one endpoint --
+# POST /auth, which validates a Home Assistant username/password on the add-on's
+# behalf -- and nothing here calls it: ttyd runs without --credential, so there
+# is no login form to consume it. It also contributes nothing to the security
+# rating, because that scoring is "if ingress: +2 elif auth_api: +1" and ingress
+# already wins.
+#
+# hassio_role: manager is needed by exactly one call -- ha-context.sh's
+# `api_call "addons"`, which lists installed add-ons for the generated context
+# file. Roles below manager do not match the bare /addons route. Manager also
+# grants, unused: /backups (which can export every secret in the instance),
+# /store, /host (reboot), /os and /mounts. It costs 1 point of the Supervisor
+# security rating. Kept because administering Home Assistant is the point of
+# this add-on, but recorded here so the blast radius is a decision, not an
+# accident.
 hassio_api: true
 hassio_role: manager
 homeassistant_api: true
-auth_api: true
 
 # Service startup configuration
 startup: services
