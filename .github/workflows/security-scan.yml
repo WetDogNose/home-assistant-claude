@@ -12,6 +12,10 @@ on:
     - cron: "23 7 * * 1"
 
 permissions:
+  # Declaring any permissions block sets every unlisted scope to `none`, so
+  # contents: read is required or actions/checkout fails with "Repository not
+  # found" and the scan never runs -- silently, including the weekly cron.
+  contents: read
   security-events: write
 
 jobs:
