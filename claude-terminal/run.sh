@@ -525,11 +525,13 @@ start_web_terminal() {
         auth_args=(--auth-header "X-Remote-User-Id")
         bashio::log.info "Ingress identity enforcement ON (set require_ingress_user: false if the terminal will not connect)"
     elif [ -n "${SUPERVISOR_TOKEN:-}" ]; then
-        bashio::log.warning "=========================================================="
-        bashio::log.warning "require_ingress_user is DISABLED."
-        bashio::log.warning "Any Home Assistant user, including non-admins, can reach"
-        bashio::log.warning "this terminal as root."
-        bashio::log.warning "=========================================================="
+        # Off is the default, so this is information rather than an alarm. It
+        # is still worth stating plainly: panel_admin hides the sidebar entry,
+        # it does not restrict access.
+        bashio::log.info "Ingress identity enforcement is off (default). Any Home Assistant"
+        bashio::log.info "user can open this terminal. Set require_ingress_user: true to"
+        bashio::log.info "restrict it -- if the terminal then fails to connect, your"
+        bashio::log.info "installation does not forward the identity header; turn it back off."
     else
         # Local development only, and only when explicitly asked for: a missing
         # SUPERVISOR_TOKEN alone must never be enough to disable the gate.
