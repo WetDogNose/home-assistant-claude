@@ -3,18 +3,18 @@ name: Build & Smoke Test
 # Runs on pushes to main as well as PRs. Publishing is tag-driven, so without
 # the push trigger a commit landing directly on main is never built, and the
 # first build would happen at release time -- where a failure means a failed
-# release. The path filters keep docs-only pushes from building anything.
+# release.
+#
+# Deliberately NO paths: filter, despite most changes not touching the image.
+# These checks are REQUIRED by branch protection, and a required check that a
+# path filter skips never reports at all -- GitHub reads "never reported" as
+# still pending, so the pull request can never merge. Always running costs
+# ~1.5 min per PR; the alternative is a docs change that is unmergeable.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "claude-terminal/**"
-      - ".github/workflows/build-test.yml"
   push:
     branches: [main]
-    paths:
-      - "claude-terminal/**"
-      - ".github/workflows/build-test.yml"
 
 jobs:
   lint:
