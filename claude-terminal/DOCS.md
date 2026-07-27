@@ -8,12 +8,47 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 
 ## Installation
 
+This repository is **private**, and the Supervisor clones add-on repositories
+anonymously by default — so the token has to be embedded in the repository URL.
+
+**First, create a read-only token.** On GitHub: **Settings** → **Developer
+settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate
+new token**, then set:
+
+- **Repository access**: *Only select repositories* → `home-assistant-claude`
+- **Permissions**: *Repository permissions* → **Contents: Read-only**
+
+Read-only Contents is everything a clone needs. Use a fine-grained token rather
+than a classic one: a classic token's `repo` scope grants read and write across
+*every* private repository you own.
+
+**Then add the repository:**
+
 1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
-3. Add `https://github.com/WetDogNose/home-assistant-claude` and click **Add**
+3. Add this URL, substituting your token, and click **Add**:
+
+   ```
+   https://WetDogNose:YOUR_TOKEN@github.com/WetDogNose/home-assistant-claude.git
+   ```
+
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
 5. Start the add-on, then click **OPEN WEB UI** to access the terminal
 6. On first use, follow the OAuth prompts to log in to your Anthropic account
+
+> **Where the token ends up.** The Supervisor stores the URL as given, so the
+> token appears in the repository list and in every Home Assistant backup. A
+> fine-grained read-only token limits a leaked backup to read access on this one
+> repository — that is the point of scoping it tightly.
+>
+> **Expiry is silent.** When the token lapses the store simply stops seeing new
+> versions rather than reporting an error; edit the repository URL with a fresh
+> token to resume. If the repository is ever made public, replace the URL with
+> the plain `https://github.com/WetDogNose/home-assistant-claude` form and
+> revoke the token.
+>
+> This token is **only** for Home Assistant to fetch the add-on. It is separate
+> from the GitHub sign-in Claude uses inside the terminal — see [GitHub](#github).
 
 Images are pulled prebuilt from `ghcr.io/wetdognose`, so installing does not
 build anything on your Home Assistant machine.

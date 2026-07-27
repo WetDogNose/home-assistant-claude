@@ -6,13 +6,49 @@ It is a fork of [heytcass/home-assistant-addons](https://github.com/heytcass/hom
 
 ## Installation
 
+This repository is **private**, and the Home Assistant Supervisor clones add-on
+repositories anonymously by default. It therefore needs a GitHub token embedded
+in the repository URL. Create the token first, then add the repository.
+
+### 1. Create a read-only access token
+
+On GitHub: **Settings** → **Developer settings** → **Personal access tokens** →
+**Fine-grained tokens** → **Generate new token**
+
+- **Repository access**: *Only select repositories* → `home-assistant-claude`
+- **Permissions**: *Repository permissions* → **Contents: Read-only**
+- Choose an expiry you are willing to renew
+
+Read-only access to Contents is all the Supervisor needs in order to clone.
+Prefer a fine-grained token over a classic one: a classic token's `repo` scope
+grants read **and write** to *every* private repository you own, where this
+grants read to exactly one.
+
+### 2. Add the repository
+
 1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
-3. Add the URL: `https://github.com/WetDogNose/home-assistant-claude`
+3. Add this URL, substituting your token:
+
+   ```
+   https://WetDogNose:YOUR_TOKEN@github.com/WetDogNose/home-assistant-claude.git
+   ```
+
 4. Click **Add**, then close the dialog
 5. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
 6. Start the add-on, then click **OPEN WEB UI** (or use the sidebar entry)
 7. On first launch, follow the OAuth prompts to sign in to your Anthropic account
+
+> **Where that token ends up.** The Supervisor stores the URL verbatim, so the
+> token is visible in the repository list and is included in Home Assistant
+> backups. A fine-grained read-only token means a leaked backup exposes read
+> access to this one repository and nothing else — which is the whole reason to
+> scope it that way.
+>
+> **When it expires**, the store silently stops picking up new versions. Edit
+> the repository URL with a fresh token to resume. If you later make this
+> repository public, replace the whole URL with the plain
+> `https://github.com/WetDogNose/home-assistant-claude` form and revoke the token.
 
 Home Assistant pulls prebuilt images from `ghcr.io/wetdognose`, so installing
 does not build anything on your Home Assistant machine.

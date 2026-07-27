@@ -32,12 +32,29 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 
 ## Installation
 
+This repository is private, so the Supervisor needs a GitHub token to clone it.
+Create a **fine-grained** token scoped to *only* this repository with
+**Contents: Read-only** (GitHub → Settings → Developer settings → Personal
+access tokens → Fine-grained tokens). That is all a clone requires — avoid a
+classic token, whose `repo` scope covers every private repository you own.
+
 1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
-3. Add `https://github.com/WetDogNose/home-assistant-claude` and click **Add**
+3. Add this URL, with your token substituted, and click **Add**:
+
+   ```
+   https://WetDogNose:YOUR_TOKEN@github.com/WetDogNose/home-assistant-claude.git
+   ```
+
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
 5. Start the add-on, then click **OPEN WEB UI** or the sidebar icon
 6. On first use, follow the OAuth prompts to log in to your Anthropic account
+
+> The Supervisor stores that URL verbatim: the token shows up in the repository
+> list and in Home Assistant backups, which is why it should be read-only and
+> limited to this one repository. When it expires the store quietly stops seeing
+> new versions — edit the URL with a fresh token. See the
+> [full documentation](DOCS.md#installation) for details.
 
 Images are pulled prebuilt from `ghcr.io/wetdognose`, so nothing is built on
 your Home Assistant machine.
