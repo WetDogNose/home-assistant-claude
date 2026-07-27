@@ -32,7 +32,7 @@ jobs:
         arch: [amd64, aarch64]
         lane: [pinned, latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve base image for this lane
         id: base
