@@ -19,12 +19,14 @@ configuration:
       rather land at a plain command prompt and start Claude yourself.
 
   require_ingress_user:
-    name: Require a Home Assistant sign-in
+    name: Require a Home Assistant sign-in (advanced)
     description: >-
-      Only allow the terminal to open for a signed-in Home Assistant user.
-      Leave this on. Turn it off only if the terminal never finishes loading,
-      which can happen if your Home Assistant version does not pass the user
-      identity through to add-ons.
+      Restricts the terminal to signed-in Home Assistant users. Off by default
+      because not every installation passes the user identity through to
+      add-ons, and where it does not, the terminal loads but never connects.
+      Turn it on and restart; if you then see "Press Enter to Reconnect", turn
+      it back off. While off, anyone with a Home Assistant account can open
+      this terminal.
 
   claude_auto_update:
     name: Keep Claude Code up to date

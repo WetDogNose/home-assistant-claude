@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.2"
+version: "2.5.1-wdn.3"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -45,7 +45,7 @@ panel_admin: true
 # Add-on configuration options
 options:
   auto_launch_claude: true
-  require_ingress_user: true
+  require_ingress_user: false
   claude_auto_update: true
   claude_version: ""
   dangerously_skip_permissions: false
@@ -59,10 +59,20 @@ options:
   persistent_pip_packages: []
 schema:
   auto_launch_claude: bool?
-  # Require the X-Remote-User-Id header the Supervisor's ingress proxy injects.
-  # panel_admin only hides the sidebar entry; without this, any authenticated
-  # Home Assistant user can reach a root shell. Turn off only if the terminal
-  # will not connect -- see DOCS.md.
+  # Require the X-Remote-User-Id header the ingress proxy injects.
+  #
+  # Defaults to FALSE, which is not the security-preferred value and is a
+  # deliberate concession to how ingress actually behaves. The Supervisor
+  # populates the identity headers only when the ingress session carries user
+  # data; sessions created without it get no header at all. ttyd applies
+  # --auth-header to the WebSocket upgrade as well as the page, so on such an
+  # instance the panel loads and then immediately fails to connect -- "Press
+  # Enter to Reconnect" forever, with no indication why.
+  #
+  # A hardening option that bricks the terminal for some users cannot be the
+  # default. Turn it ON if your instance forwards the header: it is the only
+  # thing stopping any authenticated Home Assistant user, or any co-resident
+  # add-on, from reaching a root shell.
   require_ingress_user: bool?
   claude_auto_update: bool?
   # Empty means track the newest release. Set to stable, latest, or an exact

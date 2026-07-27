@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.5.1-wdn.3
+
+### 🐛 Terminal loaded but never connected
+2.5.1-wdn.2 could show the terminal panel and then sit on "Press Enter to
+Reconnect" forever. The sign-in requirement introduced in the previous release
+is enforced on the WebSocket connection as well as the page, and Home Assistant
+only attaches the user identity to some ingress sessions — where it does not,
+the page loads and the connection is refused, with nothing on screen explaining
+why.
+
+`require_ingress_user` now defaults to **off**, restoring the previous
+behaviour. It remains available for anyone whose installation does pass the
+identity through: turn it on, restart, and if the terminal stops connecting,
+turn it back off.
+
+While it is off, anyone with a Home Assistant account can open this terminal —
+which is how the add-on has always behaved, and is documented in the security
+notes.
+
 ## 2.5.1-wdn.2
 
 ### 🐛 Add-on failed to start (restart loop)
