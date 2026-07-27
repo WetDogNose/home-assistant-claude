@@ -1,6 +1,25 @@
+# SINGLE SOURCE OF TRUTH for the base image. CI (build-test.yml, security-scan.yml)
+# reads these values with yq rather than hardcoding its own, so CI cannot pass
+# green against a different base than the one a release is built on.
+#
+# Why 3.23 and not :latest or 3.24 --
+#   :latest re-points to a whole new Alpine branch when one is cut, and because
+#     publishing is tag-driven that flip would first execute inside a release
+#     build. The scheduled canary tracks :latest instead, so the next flip shows
+#     up as a red build weeks early rather than as a broken release.
+#   3.24 moves python3 from 3.12 to 3.14. The add-on itself doesn't care, but
+#     install_persistent_packages pip-installs against HA's musllinux wheel
+#     index, whose cp314 coverage is a fraction of cp312/cp313, and there is no
+#     compiler in the image to fall back on -- persistent_pip_packages would
+#     silently stop installing.
+#   3.23 keeps python3 at 3.12.13 and carries musl 1.2.5-r23, which backports
+#     posix_getdents -- the symbol whose absence caused the 2.5.1 blank
+#     terminal. Moving here removes that failure class at the source.
+#   3.21 is EOL 2026-11-01 and has already been dropped from upstream
+#     docker-base's build matrix, so staying is not the safe option it looks like.
 build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base:3.21
-  amd64: ghcr.io/home-assistant/amd64-base:3.21
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.23
+  amd64: ghcr.io/home-assistant/amd64-base:3.23
 
 labels:
   org.opencontainers.image.title: "Home Assistant Add-on: Claude Terminal"

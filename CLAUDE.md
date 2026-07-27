@@ -59,7 +59,11 @@ There is **no unit/integration test suite.** Verification is: lint + a container
 - **Everything persistent lives in `/data`** (HOME is `/data/home`). The container filesystem is recreated on every restart.
 - **`/data` is included in HA backups** — never let caches or reproducible artifacts accumulate there (this is why `npm_config_cache=/tmp/npm-cache`).
 - **Two Claude copies exist**: the native musl binary baked into the image at `/usr/local/bin/claude` (fallback, frozen at build time, fetched straight from the npm registry — no npm/Node during build, which crashes under QEMU in aarch64 CI builds) and the native install in `/data/home/.local/bin` (persists, self-updates, wins via PATH).
-- **"Installed" and "actually runs" are separate facts.** A persistent native build can be `+x` yet abort on launch (musl symbol mismatch, e.g. `posix_getdents`). Because ttyd runs `tmux new-session ... 'claude'`, a broken binary kills the tmux session instantly and the user sees a blank terminal. `run.sh` probes with `timeout 10 claude --version` and deletes the install if it fails — **unconditionally, even when `claude_auto_update` is off**, and again after any background update. Don't regress this into a bare `-x` check.
+- **"Installed" and "actually runs" are separate facts.** A persistent native build can be `+x` yet abort on launch (musl symbol mismatch, e.g. `posix_getdents`). Because ttyd runs `tmux new-session ... 'claude-launch'`, a broken binary kills the tmux session instantly and the user sees a blank terminal. This is guarded at **three** layers, and all three matter:
+  1. **Build time** — the Dockerfile runs `ldd` on the bundled binary and fails the build on `symbol not found`. This is the only check that runs inside the build producing the shipped artifact, including `home-assistant/builder` at tag time; every CI check is a *different* build.
+  2. **Boot time** — `run.sh` probes with `timeout 10 claude --version` and deletes the persistent install if it fails, **unconditionally, even when `claude_auto_update` is off**, and again after any background update.
+  3. **Launch time** — `claude-launch` re-probes on every ttyd connection, falls back to the bundled copy, and degrades to `welcome --shell` with an explanation. ttyd resolves its command per connection while the boot guard runs once, so a self-update *after* boot is only covered here.
+  Don't regress any of these into a bare `-x` check — presence was never the failing property.
 - **Never let a non-essential step kill startup.** `set -e` is on, so intentional non-zero returns must be captured (`ensure_native_claude_usable || native_usable=$?`), not left bare.
 - **No custom session UI.** tmux `new-session -A` handles reconnects; Claude Code's own `-c`/`-r` handle continue/resume.
 
@@ -70,6 +74,7 @@ All options are read via `bashio::config` (from `/data/options.json`):
 |---|---|
 | `auto_launch_claude` | `get_claude_launch_command` |
 | `claude_auto_update` | `update_claude` |
+| `claude_version` | `claude_version_pin` → `update_claude` |
 | `dangerously_skip_permissions`, `claude_extra_args` | `build_claude_flags` (word-split; quoted multi-word args are a documented limitation) |
 | `ha_smart_context` | `generate_ha_context` |
 | `enable_ha_mcp`, `ha_mcp_version` | `scripts/setup-ha-mcp.sh` |

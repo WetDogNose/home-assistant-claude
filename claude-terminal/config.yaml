@@ -44,6 +44,7 @@ ports_description:
 options:
   auto_launch_claude: true
   claude_auto_update: true
+  claude_version: ""
   dangerously_skip_permissions: false
   claude_extra_args: ""
   ha_smart_context: true
@@ -56,6 +57,11 @@ options:
 schema:
   auto_launch_claude: bool?
   claude_auto_update: bool?
+  # Empty means track the newest release. Set to stable, latest, or an exact
+  # X.Y.Z to pin -- the escape hatch when an upstream Claude release cannot run
+  # in this image, since that install happens at runtime and no build-time test
+  # can catch it.
+  claude_version: str?
   dangerously_skip_permissions: bool?
   claude_extra_args: str?
   ha_smart_context: bool?

@@ -23,12 +23,15 @@ RUN apk add --no-cache \
     ttyd \
     vim \
     wget \
-    yq
+    yq-go
 
-# uv from PyPI, pinned: Alpine 3.21's apk uv (0.5.x) cannot install managed
-# musl CPython builds, which ha-mcp >= 4.x needs (it requires Python 3.13;
-# Alpine 3.21 ships 3.12). musllinux wheels exist for all three arches.
-RUN pip3 install --no-cache-dir --break-system-packages uv==0.11.28
+# uv from PyPI: Alpine's apk uv historically could not install managed musl
+# CPython builds, which ha-mcp needs (it requires Python 3.13 exactly, and no
+# Alpine release ships 3.13 -- 3.23 has 3.12, 3.24 has 3.14). Left unpinned so
+# builds pick up the current release; the daily canary is what catches a uv
+# release that breaks managed-Python provisioning, since nothing else exercises
+# that path until an add-on actually boots.
+RUN pip3 install --no-cache-dir --break-system-packages uv
 
 # Keep the npm cache out of persistent storage so it never lands in HA backups
 ENV npm_config_cache=/tmp/npm-cache
@@ -57,7 +60,26 @@ RUN case "$(apk --print-arch)" in \
     && curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code-${claude_pkg}/-/claude-code-${claude_pkg}-${claude_version}.tgz" \
         | tar -xz -C /tmp package/claude \
     && install -m 0755 /tmp/package/claude /usr/local/bin/claude \
-    && rm -rf /tmp/package
+    && rm -rf /tmp/package \
+    # Fail the build if the bundled binary cannot resolve against THIS image's
+    # musl. The 2.5.1 blank terminal was exactly this: present, +x, and aborting
+    # on exec with "symbol not found" -- which every presence-based check passes.
+    # ldd resolves relocations WITHOUT executing, so unlike `claude --version`
+    # it is safe during the QEMU-emulated aarch64 cross-build (executing the Bun
+    # JIT under qemu-user is the SIGILL that forced this curl+tar rewrite).
+    # Note musl's ldd exits 127 rather than 1, so grep for the message.
+    && { ldd /usr/local/bin/claude || true; } > /tmp/claude-ldd.txt 2>&1 \
+    && if grep -q 'symbol not found' /tmp/claude-ldd.txt; then \
+           echo "FATAL: bundled claude has unresolved symbols against this base image:" >&2; \
+           grep 'symbol not found' /tmp/claude-ldd.txt >&2; \
+           exit 1; \
+       fi \
+    # Record what floated, so a future breakage can be correlated with what moved
+    && mkdir -p /usr/local/share/claude-terminal \
+    && printf '{"claude":"%s","alpine":"%s","arch":"%s"}\n' \
+        "${claude_version}" "$(cat /etc/alpine-release)" "$(apk --print-arch)" \
+        > /usr/local/share/claude-terminal/build-versions.json \
+    && rm -f /tmp/claude-ldd.txt
 
 WORKDIR /config
 

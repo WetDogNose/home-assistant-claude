@@ -37,6 +37,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Same single source of truth as build-test.yml -- scanning a different
+      # base than the one that ships would make these results meaningless.
+      - name: Resolve base image from build.yaml
+        id: base
+        run: |
+          image=$(yq -r '.build_from.amd64' claude-terminal/build.yaml)
+          if [ -z "$image" ] || [ "$image" = "null" ]; then
+            echo "::error::build.yaml has no build_from entry for amd64"
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Scanning base: $image"
+
       - name: Build image for scanning
         uses: docker/build-push-action@v6
         with:
@@ -45,7 +58,7 @@ jobs:
           load: true
           tags: scan/claude-terminal:latest
           build-args: |
-            BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21
+            BUILD_FROM=${{ steps.base.outputs.image }}
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.35.0

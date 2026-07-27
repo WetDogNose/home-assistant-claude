@@ -74,20 +74,36 @@ check_node_installation() {
 check_claude_cli() {
     bashio::log.info "=== Claude CLI Check ==="
 
-    if command -v claude >/dev/null 2>&1; then
-        bashio::log.info "Claude CLI found at: $(which claude) ✓"
-
-        # Check if Claude CLI is executable
-        if [ -x "$(which claude)" ]; then
-            bashio::log.info "Claude CLI is executable ✓"
-        else
-            bashio::log.error "Claude CLI is not executable ✗"
-            return 1
+    # Deliberately runs the binary rather than testing for presence and the
+    # executable bit. The 2.5.1 failure was a binary that satisfied both and
+    # still aborted on exec, so a presence check reports a healthy CLI during
+    # the exact outage this diagnostic exists to explain.
+    local found_working=1
+    local candidate version
+    for candidate in "${HOME}/.local/bin/claude" "/usr/local/bin/claude"; do
+        if [ ! -x "$candidate" ]; then
+            bashio::log.info "${candidate}: not installed"
+            continue
         fi
-    else
-        bashio::log.error "Claude CLI not found ✗"
-        bashio::log.info "Attempting to install Claude CLI..."
+        if version=$(timeout 20 "$candidate" --version 2>&1); then
+            bashio::log.info "${candidate}: runs ✓ (${version})"
+            found_working=0
+        else
+            bashio::log.error "${candidate}: present but FAILS to run ✗"
+            bashio::log.error "  ${version}"
+            bashio::log.info "  This is what produces a blank terminal. Remove it and restart,"
+            bashio::log.info "  or pin a known-good build with the claude_version option."
+        fi
+    done
+
+    if [ "$found_working" -ne 0 ]; then
+        bashio::log.error "No working Claude CLI found ✗"
         return 1
+    fi
+
+    # Which one actually wins on PATH is what the terminal will launch
+    if command -v claude >/dev/null 2>&1; then
+        bashio::log.info "PATH resolves claude to: $(command -v claude)"
     fi
 }
 
