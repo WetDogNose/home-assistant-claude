@@ -38,15 +38,14 @@ panel_icon: mdi:code-braces
 panel_title: "Claude Terminal"
 panel_admin: true
 
-# Port configuration
-ports:
-  7681/tcp: null
-ports_description:
-  7681/tcp: "Web terminal (not required for ingress)"
+# No `ports:` key by design. ttyd runs --writable and relies on ingress for
+# authentication, so publishing a host port would put an unauthenticated root
+# shell on the LAN. The terminal is reachable through the sidebar only.
 
 # Add-on configuration options
 options:
   auto_launch_claude: true
+  require_ingress_user: true
   claude_auto_update: true
   claude_version: ""
   dangerously_skip_permissions: false
@@ -60,6 +59,11 @@ options:
   persistent_pip_packages: []
 schema:
   auto_launch_claude: bool?
+  # Require the X-Remote-User-Id header the Supervisor's ingress proxy injects.
+  # panel_admin only hides the sidebar entry; without this, any authenticated
+  # Home Assistant user can reach a root shell. Turn off only if the terminal
+  # will not connect -- see DOCS.md.
+  require_ingress_user: bool?
   claude_auto_update: bool?
   # Empty means track the newest release. Set to stable, latest, or an exact
   # X.Y.Z to pin -- the escape hatch when an upstream Claude release cannot run
@@ -136,6 +140,14 @@ map:
   - type: share
     read_only: false
 
+# Ship a custom AppArmor profile (claude-terminal/apparmor.txt). Home Assistant
+# disables seccomp for all add-ons, so without this the only mandatory access
+# control for a container running an LLM as root is Docker's generic
+# docker-default. The profile stays permissive INSIDE the container -- it must,
+# the add-on is a shell -- and denies container-escape primitives instead.
+# Also worth +1 on the Supervisor security rating.
+apparmor: claude_terminal_wdn
+
 # API access for Home Assistant integration.
 #
 # auth_api is deliberately NOT granted. It unlocks exactly one endpoint --
@@ -159,6 +171,3 @@ homeassistant_api: true
 
 # Service startup configuration
 startup: services
-
-# Web UI access URL
-webui: http://[HOST]:[PORT:7681]/

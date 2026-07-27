@@ -25,6 +25,37 @@ NC='\033[0m'
 
 BUNDLED="/usr/local/bin/claude"
 PERSISTENT="${HOME}/.local/bin/claude"
+PROVISION_DIR="/run/claude-terminal"
+
+# Provisioning (package installs, ha-mcp registration, HA context) now runs in
+# the background so the terminal opens immediately. Claude reads its MCP config
+# at startup, though, so a session launched mid-provision would silently have no
+# Home Assistant tools. Wait -- but bounded, because a wedged apk must degrade
+# to "no MCP this session", never to a terminal that never opens.
+wait_for_provisioning() {
+    [ -d "$PROVISION_DIR" ] || return 0
+    [ -f "$PROVISION_DIR/provisioned" ] && return 0
+
+    local waited=0
+    printf '  Preparing environment'
+    while [ ! -f "$PROVISION_DIR/provisioned" ] && [ "$waited" -lt 60 ]; do
+        printf '.'
+        sleep 2
+        waited=$(( waited + 2 ))
+    done
+    echo ""
+
+    if [ -f "$PROVISION_DIR/failed" ]; then
+        echo -e "  ${YELLOW}Some setup did not complete: $(cat "$PROVISION_DIR/failed")${NC}"
+        echo -e "  ${DIM}Home Assistant tools may be unavailable. Check the add-on log.${NC}"
+        echo ""
+    elif [ ! -f "$PROVISION_DIR/provisioned" ]; then
+        echo -e "  ${YELLOW}Setup is taking longer than expected; starting anyway.${NC}"
+        echo ""
+    fi
+}
+
+wait_for_provisioning
 
 runs() {
     timeout 10 "$1" --version >/dev/null 2>&1

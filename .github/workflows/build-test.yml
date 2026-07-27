@@ -151,6 +151,12 @@ jobs:
           exit $rc
           SMOKE
 
+      # #18: actually start the thing. Native arch only -- booting a full
+      # add-on under QEMU is slow and the boot path is not arch-specific.
+      - name: Boot test
+        if: matrix.arch == 'amd64'
+        run: ./ci/boot-test.sh test/claude-terminal:amd64
+
       # Record what the floating dependencies actually resolved to, so a future
       # breakage can be correlated with what moved rather than guessed at.
       - name: Record resolved dependency versions

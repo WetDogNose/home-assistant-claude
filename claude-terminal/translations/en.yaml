@@ -18,6 +18,14 @@ configuration:
       Opens Claude as soon as you open the terminal. Turn this off if you would
       rather land at a plain command prompt and start Claude yourself.
 
+  require_ingress_user:
+    name: Require a Home Assistant sign-in
+    description: >-
+      Only allow the terminal to open for a signed-in Home Assistant user.
+      Leave this on. Turn it off only if the terminal never finishes loading,
+      which can happen if your Home Assistant version does not pass the user
+      identity through to add-ons.
+
   claude_auto_update:
     name: Keep Claude Code up to date
     description: >-
@@ -93,9 +101,4 @@ configuration:
       you install by hand in the terminal is lost on restart, so list it here
       to keep it.
 
-network:
-  7681/tcp: >-
-    Web terminal. Leave this empty - the terminal is already available from the
-    Home Assistant sidebar, and publishing this port puts an unprotected
-    terminal on your network for anyone who can reach it.
 
