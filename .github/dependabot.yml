@@ -1,0 +1,41 @@
+version: 2
+
+updates:
+  # GitHub Actions are pinned to mutable major tags (@v4, @v6). A tag can be
+  # repointed by whoever controls the action, so the pin proves nothing about
+  # what runs. Dependabot raises PRs as new releases land, which is what makes
+  # moving to immutable SHA pins practical to maintain rather than a one-off
+  # that rots.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    groups:
+      # One PR for routine action bumps rather than five; security updates are
+      # still raised individually and immediately.
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The base image is declared in claude-terminal/build.yaml rather than a
+  # FROM line, so Dockerfile ecosystem support cannot see it -- the daily
+  # canary is what watches for base image drift. This entry covers any
+  # concrete FROM that gets added later.
+  - package-ecosystem: docker
+    directory: "/claude-terminal"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build"
+    labels:
+      - dependencies

@@ -12,6 +12,11 @@ on:
 
 jobs:
   claude-review:
+    # Same-repository pull requests only. Fork PRs are not given secrets, so on
+    # a public repository this would otherwise start, find no
+    # CLAUDE_CODE_OAUTH_TOKEN, and fail on every outside contribution -- noise
+    # that reads like the contributor did something wrong.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
