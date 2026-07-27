@@ -32,7 +32,7 @@ jobs:
         arch: [amd64, aarch64]
         lane: [pinned, latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Resolve base image for this lane
         id: base
@@ -48,10 +48,10 @@ jobs:
 
       - name: Set up QEMU
         if: matrix.arch != 'amd64'
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Build (no cache, always re-pull)
         id: build
@@ -59,7 +59,7 @@ jobs:
         # red X on an Alpine branch we have not adopted would train us to
         # ignore this workflow's status entirely.
         continue-on-error: ${{ matrix.lane == 'latest' }}
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ./claude-terminal
           push: false

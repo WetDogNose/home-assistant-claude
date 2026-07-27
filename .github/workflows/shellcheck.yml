@@ -12,6 +12,12 @@ on:
 
 # Cancel superseded runs: pushing twice to a PR should not leave the first
 # build burning minutes on a commit nobody will merge.
+# Least privilege: this workflow only reads the repository. Without an explicit
+# block the job inherits the repository default, which can be widened later
+# without anyone revisiting the workflows.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,10 +27,10 @@ jobs:
     name: Lint shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@2.0.0
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
         with:
           scandir: claude-terminal
           severity: warning

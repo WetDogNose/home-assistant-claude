@@ -3,18 +3,22 @@ name: Security Scan
 on:
   pull_request:
     branches: [main]
+    # Watch the whole add-on, not just the Dockerfile and run.sh. A new apk
+    # package, a new helper script or a changed base image all alter what
+    # Trivy would find, and every one of those lived outside the old filter.
     paths:
-      - "claude-terminal/Dockerfile"
-      - "claude-terminal/run.sh"
+      - "claude-terminal/**"
       - ".github/workflows/security-scan.yml"
   # Also scan pushes to main: without this, a Dockerfile change landing
   # directly on main goes unscanned until the weekly cron, which can be six
   # days later -- and a release could ship in between.
   push:
     branches: [main]
+    # Watch the whole add-on, not just the Dockerfile and run.sh. A new apk
+    # package, a new helper script or a changed base image all alter what
+    # Trivy would find, and every one of those lived outside the old filter.
     paths:
-      - "claude-terminal/Dockerfile"
-      - "claude-terminal/run.sh"
+      - "claude-terminal/**"
       - ".github/workflows/security-scan.yml"
   schedule:
     # Weekly scan to catch newly disclosed CVEs
@@ -38,10 +42,10 @@ jobs:
     name: Container vulnerability scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       # Same single source of truth as build-test.yml -- scanning a different
       # base than the one that ships would make these results meaningless.
@@ -57,7 +61,7 @@ jobs:
           echo "Scanning base: $image"
 
       - name: Build image for scanning
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ./claude-terminal
           push: false
@@ -67,7 +71,7 @@ jobs:
             BUILD_FROM=${{ steps.base.outputs.image }}
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: scan/claude-terminal:latest
           format: table
@@ -89,7 +93,7 @@ jobs:
           fi
 
       - name: Run Trivy (SARIF for Security tab)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: scan/claude-terminal:latest
           format: sarif
@@ -103,7 +107,7 @@ jobs:
       # are in the job summary above regardless. Drop continue-on-error if the
       # repo becomes public or gains Advanced Security.
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         if: always()
         continue-on-error: true
         with:
