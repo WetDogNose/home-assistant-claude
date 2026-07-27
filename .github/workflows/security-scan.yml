@@ -68,8 +68,15 @@ jobs:
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
 
+      # Non-fatal: publishing to the Security tab requires code scanning, which
+      # on a private repository needs GitHub Advanced Security. Without it this
+      # step fails with "Resource not accessible by integration" and would mask
+      # the scan result, which is the part that actually matters -- the findings
+      # are in the job summary above regardless. Drop continue-on-error if the
+      # repo becomes public or gains Advanced Security.
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
+        continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
