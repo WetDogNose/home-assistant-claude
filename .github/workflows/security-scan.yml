@@ -61,7 +61,7 @@ jobs:
             BUILD_FROM=${{ steps.base.outputs.image }}
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: scan/claude-terminal:latest
           format: table
@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Run Trivy (SARIF for Security tab)
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: scan/claude-terminal:latest
           format: sarif
