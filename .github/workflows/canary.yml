@@ -72,46 +72,13 @@ jobs:
           build-args: |
             BUILD_FROM=${{ steps.base.outputs.image }}
 
-      - name: Relocations resolve
+      # Same assertions as build-test, via the shared script.
+      - name: Smoke test
         if: steps.build.outcome == 'success'
         continue-on-error: ${{ matrix.lane == 'latest' }}
         run: |
-          docker run --rm -i --entrypoint /bin/bash \
-            canary/claude-terminal:${{ matrix.arch }}-${{ matrix.lane }} -s <<'SMOKE'
-          rc=0
-          for bin in claude gh ttyd tmux node jq curl uv git; do
-            p=$(command -v "$bin") || { echo "FAIL: $bin not found"; rc=1; continue; }
-            out=$(ldd "$p" 2>&1 || true)
-            if printf '%s' "$out" | grep -q 'symbol not found'; then
-              echo "FAIL: $bin has unresolved symbols:"
-              printf '%s\n' "$out" | grep 'symbol not found'
-              rc=1
-            else
-              echo "OK(ldd): $bin"
-            fi
-          done
-          exit $rc
-          SMOKE
-
-      - name: Binaries run (native arch only)
-        if: matrix.arch == 'amd64' && steps.build.outcome == 'success'
-        continue-on-error: ${{ matrix.lane == 'latest' }}
-        run: |
-          docker run --rm -i --entrypoint /bin/bash \
-            canary/claude-terminal:amd64-${{ matrix.lane }} -s <<'SMOKE'
-          rc=0
-          for probe in "claude --version" "gh --version" "uv --version" \
-                       "node --version" "git --version" "tmux -V" \
-                       "python3 --version" "yq --version"; do
-            if out=$(timeout 30 $probe 2>&1); then
-              echo "OK: $probe -> $(printf '%s' "$out" | head -1)"
-            else
-              echo "FAIL: $probe -> $(printf '%s' "$out" | head -3)"
-              rc=1
-            fi
-          done
-          exit $rc
-          SMOKE
+          ./ci/smoke.sh canary/claude-terminal:${{ matrix.arch }}-${{ matrix.lane }} \
+            ${{ matrix.arch == 'amd64' && '--exec' || '' }}
 
       - name: Report what floated
         if: always() && steps.build.outcome == 'success'

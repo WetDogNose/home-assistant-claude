@@ -16,6 +16,12 @@ on:
   push:
     branches: [main]
 
+# Cancel superseded runs: pushing twice to a PR should not leave the first
+# build burning minutes on a commit nobody will merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint Dockerfile
@@ -28,6 +34,14 @@ jobs:
           failure-threshold: error
           # HA add-ons use BUILD_FROM arg for base image and Alpine rolling packages
           ignore: DL3006,DL3018
+
+  docs:
+    name: Docs & options drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check options are labelled and documented
+        run: ./ci/check-docs-drift.sh
 
   build:
     name: Build (${{ matrix.arch }})
@@ -71,85 +85,21 @@ jobs:
           # image rather than a manifest list, which `docker run` cannot load.
           load: true
           provenance: false
+          # Layer cache keyed per architecture. The apk layer dominates build
+          # time and changes rarely, so most PRs now rebuild only the Claude
+          # fetch and the COPY layers.
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
           platforms: ${{ matrix.arch == 'amd64' && 'linux/amd64' || 'linux/arm64' }}
           tags: test/claude-terminal:${{ matrix.arch }}
           build-args: |
             BUILD_FROM=${{ steps.base.outputs.image }}
 
-      - name: Smoke test — scripts are executable
+      # Shared with the canary and runnable locally: ci/smoke.sh <image> [--exec]
+      - name: Smoke test
         run: |
-          docker run --rm -i --entrypoint /bin/bash \
-            test/claude-terminal:${{ matrix.arch }} -s <<'SMOKE'
-          rc=0
-          for script in \
-            /run.sh \
-            /opt/scripts/setup-ha-mcp.sh \
-            /opt/scripts/health-check.sh \
-            /opt/scripts/persist-install.sh \
-            /opt/scripts/ha-context.sh \
-            /opt/scripts/github-setup.sh \
-            /opt/scripts/claude-launch.sh \
-            /opt/scripts/welcome.sh; do
-            if [ -x "$script" ]; then echo "OK: $script"; else
-              echo "FAIL: $script is not executable"; rc=1
-            fi
-          done
-          exit $rc
-          SMOKE
-
-      # Relocation check on BOTH arches. ldd resolves symbols without executing,
-      # so it is safe under QEMU where running a JIT binary is not (failure #2 in
-      # this repo's history was V8 SIGILL under qemu-user). This is the check
-      # that catches the 2.5.1 class: present, +x, aborts on exec.
-      - name: Smoke test — relocations resolve
-        run: |
-          docker run --rm -i --entrypoint /bin/bash \
-            test/claude-terminal:${{ matrix.arch }} -s <<'SMOKE'
-          rc=0
-          for bin in claude gh ttyd tmux node jq curl uv git; do
-            p=$(command -v "$bin") || { echo "FAIL: $bin not found"; rc=1; continue; }
-            out=$(ldd "$p" 2>&1 || true)
-            if printf '%s' "$out" | grep -q 'symbol not found'; then
-              echo "FAIL: $bin has unresolved symbols against this base image:"
-              printf '%s\n' "$out" | grep 'symbol not found'
-              rc=1
-            else
-              echo "OK(ldd): $bin"
-            fi
-          done
-          exit $rc
-          SMOKE
-
-      # Actually EXECUTE the binaries. Only on the native arch: emulating a JIT
-      # runtime under qemu-user is a known-flaky signal here, and a test that
-      # flakes gets muted, which is worse than not having it.
-      - name: Smoke test — binaries actually run
-        if: matrix.arch == 'amd64'
-        run: |
-          docker run --rm -i --entrypoint /bin/bash \
-            test/claude-terminal:amd64 -s <<'SMOKE'
-          rc=0
-          check() {
-            name=$1; shift
-            if out=$(timeout 30 "$@" 2>&1); then
-              echo "OK: $name -> $(printf '%s' "$out" | head -1)"
-            else
-              echo "FAIL: $name did not run: $(printf '%s' "$out" | head -3)"
-              rc=1
-            fi
-          }
-          check claude  claude --version
-          check gh      gh --version
-          check uv      uv --version
-          check node    node --version
-          check npm     npm --version
-          check git     git --version
-          check jq      jq --version
-          check tmux    tmux -V
-          check python3 python3 --version
-          check yq      yq --version
-          exit $rc
-          SMOKE
+          ./ci/smoke.sh test/claude-terminal:${{ matrix.arch }} \
+            ${{ matrix.arch == 'amd64' && '--exec' || '' }}
 
       # Record what the floating dependencies actually resolved to, so a future
       # breakage can be correlated with what moved rather than guessed at.
@@ -162,11 +112,7 @@ jobs:
             echo "Base image: \`${{ steps.base.outputs.image }}\`"
             echo ""
             echo '```'
-            docker run --rm -i --entrypoint /bin/bash \
-              test/claude-terminal:${{ matrix.arch }} -s <<'SMOKE' || true
-          cat /usr/local/share/claude-terminal/build-versions.json 2>/dev/null || echo '{}'
-          echo "alpine: $(cat /etc/alpine-release)"
-          apk info -v 2>/dev/null | sort | grep -E '^(git|github-cli|nodejs|npm|tmux|ttyd|python3|jq|curl|yq-go)-[0-9]' || true
-          SMOKE
+            ./ci/smoke.sh test/claude-terminal:${{ matrix.arch }} 2>/dev/null \
+              | sed -n '/^== versions ==/,$p' | tail -n +2 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

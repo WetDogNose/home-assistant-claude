@@ -67,3 +67,50 @@ jobs:
             --image "${{ matrix.arch }}-addon-claude-terminal" \
             --docker-hub "ghcr.io/${{ steps.ns.outputs.owner }}" \
             --addon
+
+  # Verify the artefact that actually SHIPS. Every other check in this repo
+  # tests a different build of floating dependencies, resolved at a different
+  # moment -- this is the only one that runs against the bytes users pull.
+  verify:
+    name: Verify published image (${{ matrix.arch }})
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, amd64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Resolve namespace and version
+        id: ref
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          version=$(yq -r '.version' claude-terminal/config.yaml)
+          echo "image=ghcr.io/${owner}/${{ matrix.arch }}-addon-claude-terminal:${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull the published image
+        run: |
+          echo "Pulling ${{ steps.ref.outputs.image }}"
+          docker pull --platform \
+            ${{ matrix.arch == 'amd64' && 'linux/amd64' || 'linux/arm64' }} \
+            "${{ steps.ref.outputs.image }}"
+
+      - name: Smoke test the published image
+        run: |
+          ./ci/smoke.sh "${{ steps.ref.outputs.image }}" \
+            ${{ matrix.arch == 'amd64' && '--exec' || '' }}
+
+      - name: Report
+        if: always()
+        run: |
+          echo "### Published image verified — ${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '`${{ steps.ref.outputs.image }}`' >> "$GITHUB_STEP_SUMMARY"
