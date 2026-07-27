@@ -40,10 +40,10 @@ jobs:
         # was dropped upstream); armv7 installs keep building locally
         arch: [aarch64, amd64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -59,7 +59,7 @@ jobs:
           echo "Publishing to ghcr.io/${owner}"
 
       - name: Build and push add-on image
-        uses: home-assistant/builder@2026.02.1
+        uses: home-assistant/builder@6cb4fd3d1338b6e22d0958a4bcb53e0965ea63b4 # 2026.02.1
         with:
           args: |
             --${{ matrix.arch }} \
@@ -83,11 +83,11 @@ jobs:
       matrix:
         arch: [aarch64, amd64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up QEMU
         if: matrix.arch != 'amd64'
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Resolve namespace and version
         id: ref

@@ -20,6 +20,10 @@ updates:
   # what runs. Dependabot raises PRs as new releases land, which is what makes
   # moving to immutable SHA pins practical to maintain rather than a one-off
   # that rots.
+  # Actions are pinned to immutable SHAs with the version in a trailing
+  # comment. Dependabot reads that comment, so it still proposes upgrades and
+  # rewrites both the SHA and the comment -- pinning does not freeze them, it
+  # just means a repointed tag cannot silently change what runs.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
