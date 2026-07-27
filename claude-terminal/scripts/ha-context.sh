@@ -110,9 +110,20 @@ section_system_info() {
     [ -n "$timezone" ] && echo "- **Timezone**: ${timezone}"
 }
 
+# Fetched once and reused. section_entity_summary and section_addons both
+# needed this payload and were each pulling it separately, which on a large
+# instance is two multi-megabyte responses for one document.
+STATES_CACHE=""
+get_states() {
+    if [ -z "$STATES_CACHE" ]; then
+        STATES_CACHE=$(ha_api_call "states")
+    fi
+    printf '%s' "$STATES_CACHE"
+}
+
 section_entity_summary() {
     local states
-    states=$(ha_api_call "states")
+    states=$(get_states)
 
     if [ -z "$states" ] || ! echo "$states" | jq -e '.' >/dev/null 2>&1; then
         echo "Unable to retrieve entity states."
@@ -179,34 +190,55 @@ section_entity_summary() {
     fi
 }
 
+# Add-ons are read from the update entities Home Assistant already publishes
+# for each one, rather than from the Supervisor's /addons route.
+#
+# That route is the ONLY call in this add-on that required hassio_role: manager,
+# and manager also grants /backups (which can export every secret in the
+# instance), /store, /host reboot and /mounts -- none of which anything here
+# uses. Sourcing the same information from the states payload we have already
+# fetched lets the role drop to default, and costs one fewer API call.
 section_addons() {
-    local addons_data
-    addons_data=$(api_call "addons")
+    local states
+    states=$(get_states)
 
-    if [ -z "$addons_data" ] || ! echo "$addons_data" | jq -e '.data.addons' >/dev/null 2>&1; then
+    if [ -z "$states" ] || ! echo "$states" | jq -e '.' >/dev/null 2>&1; then
         echo "Unable to retrieve add-on information."
         return
     fi
 
-    echo "$addons_data" | jq -r '
-        .data.addons[] |
-        select(.installed == true) |
-        "- \(.name) v\(.version) (\(.state))"
-    ' 2>/dev/null | sort
-}
+    local addons
+    addons=$(echo "$states" | jq -r '
+        [ .[]
+          | select(.entity_id | startswith("update."))
+          | select(.attributes.installed_version != null)
+          | select(.entity_id | test("home_assistant_(core|supervisor|operating_system)") | not)
+          | "- \(.attributes.title // .attributes.friendly_name // .entity_id) v\(.attributes.installed_version)"
+            + (if .state == "on" then " (update available: \(.attributes.latest_version))" else "" end)
+        ] | sort | .[]
+    ' 2>/dev/null)
 
-section_recent_errors() {
-    local error_log
-    error_log=$(ha_api_call "error_log")
-
-    if [ -z "$error_log" ] || [ "$error_log" = "\"\"" ]; then
-        echo "No recent errors."
+    if [ -z "$addons" ]; then
+        echo "No add-on update entities found."
         return
     fi
+    echo "$addons"
+}
 
-    # Take last 20 lines, truncate long lines
-    echo '```'
-    echo "$error_log" | tail -20 | cut -c1-200
+# Deliberately no error-log section.
+#
+# It captured 20 lines of the error log at generation time and froze them into
+# a file Claude reads on every session. That is stale within minutes, invites
+# Claude to reason about errors that were fixed hours ago, and copies whatever
+# happened to be in the log -- tokens, IPs, entity names -- into a file that
+# persists in /data. Claude can read the live log on demand instead, which is
+# both accurate and scoped to when it is actually needed.
+section_error_hint() {
+    echo "Read the current error log when you need it:"
+    echo ""
+    echo '```bash'
+    echo 'curl -s -H "Authorization: Bearer $SUPERVISOR_TOKEN" \'
+    echo '  http://supervisor/core/api/error_log | tail -50'
     echo '```'
 }
 
@@ -251,11 +283,11 @@ DIVIDER
 
     cat >> "$tmp_file" << 'DIVIDER'
 
-## Recent Errors
+## Errors
 
 DIVIDER
 
-    section_recent_errors >> "$tmp_file"
+    section_error_hint >> "$tmp_file"
 
     cat >> "$tmp_file" << 'APIREF'
 

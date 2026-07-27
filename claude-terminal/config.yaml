@@ -157,16 +157,21 @@ apparmor: claude_terminal_wdn
 # rating, because that scoring is "if ingress: +2 elif auth_api: +1" and ingress
 # already wins.
 #
-# hassio_role: manager is needed by exactly one call -- ha-context.sh's
-# `api_call "addons"`, which lists installed add-ons for the generated context
-# file. Roles below manager do not match the bare /addons route. Manager also
-# grants, unused: /backups (which can export every secret in the instance),
-# /store, /host (reboot), /os and /mounts. It costs 1 point of the Supervisor
-# security rating. Kept because administering Home Assistant is the point of
-# this add-on, but recorded here so the blast radius is a decision, not an
-# accident.
+# hassio_role is now `default`. It used to be `manager` for exactly one call --
+# ha-context.sh listing installed add-ons via the Supervisor's /addons route --
+# and manager additionally granted /backups (which can export every secret in
+# the instance), /store, /host reboot, /os and /mounts, none of which anything
+# here used. ha-context now derives the same list from the update entities
+# Home Assistant already publishes, which come back in the states payload it
+# was fetching anyway, so the grant is no longer needed.
+#
+# Everything else the add-on calls still works at default: /addons/self/info
+# bypasses the role check entirely, /*/info is allowed at default, and the
+# /core/api/* proxy is gated by homeassistant_api rather than by role.
+#
+# Worth +1 on the Supervisor security rating.
 hassio_api: true
-hassio_role: manager
+hassio_role: default
 homeassistant_api: true
 
 # Service startup configuration

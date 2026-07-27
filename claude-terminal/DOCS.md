@@ -93,6 +93,7 @@ claude-doctor   # diagnose network, auth, and environment issues
 claude-login-url   # save the OAuth login URL to /config (see Troubleshooting)
 github-setup    # sign in to GitHub and enable git push (see GitHub below)
 data-gc         # show what is using space under /data; 'data-gc clean' prunes it
+ha-notify       # raise a Home Assistant notification (used by the add-on itself)
 persist-install apk htop   # install packages that survive restarts
 ha-context      # refresh the Home Assistant context file
 ```
@@ -178,7 +179,7 @@ Read this before signing in — it grants real access.
 
 ## Troubleshooting
 
-- **Can't copy the OAuth login URL / "Authorization failed – Invalid request format"**: the browser terminal's clipboard path truncates very long payloads, and the login URL is one — a cut-off `state` parameter causes exactly that authorization error. Reliable path: while the login prompt is showing, open a second tmux window (`Ctrl+B` then `C`), run `claude-login-url`, and open `/config/claude-login-url.txt` with the File Editor add-on (or over Samba) — copy the URL from there. Switch back with `Ctrl+B` then `L` to paste the resulting code. Delete the file when done. Don't click the link in the terminal directly: link detection truncates URLs that wrap across lines.
+- **Can't copy the OAuth login URL**: run `claude-login-url` — as well as writing the URL to `/config`, it now pushes it to your Home Assistant **notifications**, where you can select and copy it with the browser's own clipboard. Full detail: the browser terminal's clipboard path truncates very long payloads, and the login URL is one — a cut-off `state` parameter causes exactly that authorization error. Reliable path: while the login prompt is showing, open a second tmux window (`Ctrl+B` then `C`), run `claude-login-url`, and open `/config/claude-login-url.txt` with the File Editor add-on (or over Samba) — copy the URL from there. Switch back with `Ctrl+B` then `L` to paste the resulting code. Delete the file when done. Don't click the link in the terminal directly: link detection truncates URLs that wrap across lines.
 - **Terminal never finishes loading / stays blank with no prompt**: if this started after an update, your Home Assistant may not be passing the signed-in user through to add-ons. Set `require_ingress_user: false` in the add-on configuration and restart. Please report it if that fixes it.
 - **Terminal opens blank or closes instantly**: this means Claude Code could not start. The add-on now detects that at launch and drops you to a shell with an explanation instead of a blank screen, so run `claude-doctor` there — it reports each installed copy and whether it actually runs. The usual cause is an update pulling a build incompatible with this image; `rm -f ~/.local/bin/claude` and restart to fall back to the bundled copy, then set `claude_version` to a known-good `X.Y.Z` so the next update does not reintroduce it.
 - **Claude exits immediately or behaves oddly**: restart the add-on so the background auto-updater can fetch the latest Claude Code; check the add-on log for update messages.
