@@ -130,6 +130,89 @@ are in **[DOCS.md](claude-terminal/DOCS.md#security-notes)**.
 
 ---
 
+## Releasing
+
+Merging to `main` ships **nothing**. Publishing is driven entirely by pushing a
+`v*` tag, so a release is: bump the version, write the changelog, tag.
+
+### 1. Choose the version number
+
+Versions are `<upstream base>-wdn.<n>`:
+
+| Situation | Next version |
+|---|---|
+| Your own change, same upstream base | bump `n` → `2.5.1-wdn.2` |
+| You merged a new upstream release | take their version, reset `n` → `2.6.0-wdn.1` |
+
+Check what the current one is, and what has already shipped:
+
+```bash
+grep '^version:' claude-terminal/config.yaml
+git tag -l 'v*' | sort -V | tail -5
+```
+
+`n` only ever goes up within a base. Never reuse a tag — the image tag is
+derived from this version, and a reused tag silently changes what an already
+published version means.
+
+### 2. Bump and describe it
+
+Both are required, and `release.yml` fails the tag if they disagree:
+
+```bash
+# claude-terminal/config.yaml
+version: "2.5.1-wdn.2"
+
+# claude-terminal/CHANGELOG.md — a section whose heading matches EXACTLY
+## 2.5.1-wdn.2
+```
+
+The changelog section becomes the GitHub release notes, so write it for
+someone deciding whether to update, not for yourself.
+
+Open a PR with those two changes as normal — `main` is protected, and the
+required checks must pass.
+
+### 3. Tag it
+
+Once that PR is merged:
+
+```bash
+git checkout main && git pull
+git tag v2.5.1-wdn.2 && git push origin v2.5.1-wdn.2
+```
+
+That single push runs the whole release: `release.yml` verifies the tag matches
+`config.yaml`, extracts your changelog section and creates the GitHub release;
+`publish-images.yml` builds both architectures, pushes them to GHCR, then
+**pulls each image back and smoke-tests it**.
+
+### 4. Confirm it is actually installable
+
+The Supervisor pulls the tag matching `version:` verbatim — there is no
+fallback to `latest`, so a missing image is a 404 at install time, not a
+warning:
+
+```bash
+tok=$(curl -s "https://ghcr.io/token?scope=repository:wetdognose/amd64-addon-claude-terminal:pull&service=ghcr.io" | jq -r .token)
+curl -s -H "Authorization: Bearer $tok" \
+  https://ghcr.io/v2/wetdognose/amd64-addon-claude-terminal/tags/list | jq -r '.tags[]'
+```
+
+Your new version should be listed. In Home Assistant, the add-on then offers
+the update normally.
+
+> [!TIP]
+> **If the publish fails**, fix the cause and re-run it against the existing tag
+> rather than re-tagging:
+> ```bash
+> gh workflow run publish-images.yml --ref v2.5.1-wdn.2
+> ```
+> Deleting and re-pushing a tag works, but anyone who already pulled the old
+> one keeps it.
+
+---
+
 ## Community tools
 
 Built by others to extend Claude Terminal:
