@@ -135,6 +135,22 @@ are in **[DOCS.md](claude-terminal/DOCS.md#security-notes)**.
 Merging to `main` ships **nothing**. Publishing is driven entirely by pushing a
 `v*` tag, so a release is: bump the version, write the changelog, tag.
 
+### 0. One-time: point `gh` at this repository
+
+This repo has an `upstream` remote, and the GitHub CLI resolves a bare command
+to the **parent** repository when it finds one. So `gh run list` reports on
+upstream's runs, not yours — quietly, with plausible-looking output.
+
+Fix it once:
+
+```bash
+gh repo set-default WetDogNose/home-assistant-claude
+```
+
+Otherwise pass `-R WetDogNose/home-assistant-claude` to every `gh` command
+below. Note it is needed on **each** command in a pipeline, including any
+nested `$(gh ...)` that supplies an argument.
+
 ### 1. Choose the version number
 
 Versions are `<upstream base>-wdn.<n>`:
@@ -173,6 +189,19 @@ someone deciding whether to update, not for yourself.
 Open a PR with those two changes as normal — `main` is protected, and the
 required checks must pass.
 
+> [!NOTE]
+> **Not every merge needs a release.** The Supervisor reads `config.yaml`,
+> `DOCS.md` and `translations/` from the default branch, so changes to those
+> take effect on merge — a store reload is enough. Only changes that land
+> *inside the image* need a new version and tag:
+>
+> ```bash
+> git diff --name-only $(git describe --tags --abbrev=0)..main -- \
+>   claude-terminal/Dockerfile claude-terminal/run.sh claude-terminal/scripts/
+> ```
+>
+> Non-empty means tag. Empty means reload the store and you are done.
+
 ### 3. Tag it
 
 Once that PR is merged:
@@ -202,11 +231,20 @@ curl -s -H "Authorization: Bearer $tok" \
 Your new version should be listed. In Home Assistant, the add-on then offers
 the update normally.
 
+To watch the release as it runs — `-R` on **both** commands, since the inner
+one selects which run to watch:
+
+```bash
+gh run watch -R WetDogNose/home-assistant-claude \
+  $(gh run list -R WetDogNose/home-assistant-claude --workflow="Publish Images" \
+    --limit 1 --json databaseId --jq '.[0].databaseId')
+```
+
 > [!TIP]
 > **If the publish fails**, fix the cause and re-run it against the existing tag
 > rather than re-tagging:
 > ```bash
-> gh workflow run publish-images.yml --ref v2.5.1-wdn.2
+> gh workflow run publish-images.yml -R WetDogNose/home-assistant-claude --ref v2.5.1-wdn.2
 > ```
 > Deleting and re-pushing a tag works, but anyone who already pulled the old
 > one keeps it.
