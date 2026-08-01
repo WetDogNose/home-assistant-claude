@@ -5,8 +5,42 @@ blueprint:
     an event or schedule fires.
 
 
+    ## Choose the trigger carefully
+
+
+    Claude runs with access to Home Assistant, so it can call services, change
+    entity states and edit files under `/config`. Anything it does can itself
+    produce state changes, logbook entries and log records — which means a
+    trigger that fires on Home Assistant's own output can re-fire on the
+    consequences of the previous run, and keep going.
+
+
+    Do not trigger this on `system_log_event`, on the error log, on logbook
+    entries, or on a bare `state_changed` event. Trigger on the specific thing
+    you care about — a named entity, a time, a webhook, a button — so the loop
+    cannot close.
+
+
+    Two guards are built in, and neither relies on a template that could itself
+    raise: `mode: single` drops a run that arrives while one is still going,
+    and `max_exceeded: silent` stops that drop from writing a warning, because
+    the warning is itself a log record and would be fuel for the very loop the
+    guard exists to stop.
+
+
+    The Automation API adds its own ceiling: 10 requests per minute per caller,
+    a single-execution mutex that answers 503 while a prompt is running, and a
+    request timeout. A runaway automation is therefore rate-limited rather than
+    running Claude continuously — but it can still emit failed calls as fast as
+    the trigger fires, so the trigger remains yours to get right.
+
+
+    ## Required setup
+
+
     This blueprint calls a REST command, which Home Assistant only lets you
-    define in `configuration.yaml`. Add this once, then restart Home Assistant:
+    define in `configuration.yaml`. Add this once, then restart Home Assistant.
+    Without it the automation fails at runtime with an unknown-service error:
 
 
     ```yaml
@@ -29,7 +63,9 @@ blueprint:
   input:
     automation_trigger:
       name: Trigger
-      description: What should start the Claude task.
+      description: >
+        What should start the Claude task. Avoid log, logbook and bare
+        state_changed event triggers — see the note above on feedback loops.
       selector:
         trigger:
     task_prompt:
@@ -58,6 +94,21 @@ blueprint:
 # The trigger is supplied by the user through the input above; an automation
 # with a hardcoded empty trigger list can never fire.
 triggers: !input automation_trigger
+
+# Overlapping runs are dropped rather than queued, and the drop is silent.
+#
+# The default max_exceeded is `warning`, which writes a log line every time a
+# run is skipped. On an automation whose action can cause further Home
+# Assistant activity, that log line is itself an event a badly chosen trigger
+# could fire on -- so the guard against pile-up would end up feeding the loop
+# it exists to prevent.
+#
+# Deliberately no template-based cooldown condition: a condition that can raise
+# (an unset last_triggered, a missing entity) logs an error on every
+# evaluation, which is the same hazard in a different costume. These two keys
+# are declarative and cannot fail.
+mode: single
+max_exceeded: silent
 
 actions:
   - action: rest_command.claude_terminal_query

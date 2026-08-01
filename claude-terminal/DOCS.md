@@ -184,9 +184,27 @@ claude_api_token: "YOUR_32_CHAR_TOKEN"
 
 ### Using the shipped blueprint
 
-The add-on copies a **Claude Terminal Task Trigger** blueprint into
-`/config/blueprints/automation/` on start-up (when that directory exists), so it
-shows up under **Settings → Automations & scenes → Blueprints**.
+The add-on installs a **Claude Terminal Task Trigger** blueprint into
+`/config/blueprints/automation/` (when that directory exists), so it shows up
+under **Settings → Automations & scenes → Blueprints**.
+
+It is installed **once**, not re-copied on every start. Delete it and it stays
+deleted; edit it and your edits survive restarts. A later add-on release
+updates the file only if you haven't changed it. If you removed it and want it
+back, delete `/data/.blueprint-baseline.yaml` and restart the add-on.
+
+> **Choosing a trigger matters.** An automation built from this blueprint can
+> make Claude act on Home Assistant, and those actions produce state changes,
+> logbook entries and log records. A trigger that fires on Home Assistant's own
+> output — `system_log_event`, the error log, logbook entries, a bare
+> `state_changed` — can therefore re-fire on the previous run's consequences and
+> keep going. Trigger on the specific thing you care about instead.
+>
+> The blueprint ships with `mode: single` and `max_exceeded: silent` so
+> overlapping runs are dropped without logging a warning (the warning would
+> itself be an event such a trigger could fire on), and the Automation API caps
+> callers at 10 requests/minute with a single-execution mutex. Those bound the
+> damage; they don't replace picking a sane trigger.
 
 It calls a REST command, and Home Assistant only lets you declare those in
 `configuration.yaml`. Add this once and restart Home Assistant before using the
