@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.1-wdn.6
+
+### 📚 Documentation & Agent Context Updates
+- Updated repo-wide documentation (`CLAUDE.md`, `DEVELOPMENT.md`, `SECURITY.md`, `README.md`, `claude-terminal/README.md`).
+- Enhanced `ha-context.sh` so the auto-generated `~/.claude/CLAUDE.md` context includes complete Automation API guidance, endpoints, and token details for Claude Code.
+
 ## 2.5.1-wdn.5
 
 ### ✨ Home Assistant Automation API
