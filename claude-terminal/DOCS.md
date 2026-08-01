@@ -62,6 +62,13 @@ Useful commands (in shell mode, or after exiting Claude):
 claude          # start Claude Code
 claude -c       # continue the most recent conversation
 claude -r       # pick a past conversation to resume
+ha-diagnose     # one-command Home Assistant & add-on system health check
+ha-validate     # validate HA configuration via API (use --safe-edit <file> for backup safety)
+ha-snapshot     # capture camera image for Claude vision inspection (<camera_entity>)
+ha-scaffold     # generate boilerplate for a new HA custom integration (<domain>)
+claude-cron     # manage autonomous background scheduled prompts (add|list|remove)
+esphome-setup   # install & persist ESPHome CLI toolchain
+ha-tts          # send text-to-speech announcement to HA media player
 claude-doctor   # diagnose network, auth, and environment issues
 claude-login-url   # save the OAuth login URL to /config (see Troubleshooting)
 github-setup    # sign in to GitHub and enable git push (see GitHub below)

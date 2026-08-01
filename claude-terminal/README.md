@@ -20,7 +20,12 @@ This app runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claud
 ## Features
 
 - **Just Claude Code**: opens straight into Claude — no menus in the way
-- **Automation API**: HTTP daemon (port 8128) allowing Home Assistant automations to trigger non-interactive Claude prompts safely
+- **Automation API & Blueprint**: HTTP daemon (port 8128) and HA Blueprint for non-interactive Claude prompts
+- **YAML Guardrails & Validation**: `ha-validate` utility checks configuration via HA API and auto-restores `.bak` on error
+- **Camera Vision**: `ha-snapshot` captures camera frames for Claude visual analysis
+- **Dev & ESPHome Tools**: `ha-scaffold` generates custom integration boilerplate; `esphome-setup` installs ESPHome CLI
+- **Autonomous Scheduler**: `claude-cron` executes scheduled background prompts and posts HA notifications
+- **Quick-Bar & Diagnostics**: `ha-diagnose` for one-command system health; `Ctrl+B h` popup menu in tmux
 - **Stays current**: the official native Claude Code build is installed into persistent storage and auto-updated in the background
 - **Session persistence**: tmux keeps your conversation alive across browser reloads and HA navigation; scrollback and mouse copy work
 - **Persistent auth**: log in once via OAuth; credentials survive restarts and updates

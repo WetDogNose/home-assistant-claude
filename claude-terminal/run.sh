@@ -133,7 +133,14 @@ setup_commands() {
         "data-gc:/opt/scripts/data-gc.sh" \
         "claude-api-server:/opt/scripts/claude-api-server.py" \
         "claude-login-notifier:/opt/scripts/claude-login-notifier.sh" \
-        "ha-notify:/opt/scripts/ha-notify.sh"; do
+        "ha-notify:/opt/scripts/ha-notify.sh" \
+        "ha-snapshot:/opt/scripts/ha-snapshot.sh" \
+        "ha-validate:/opt/scripts/ha-validate.sh" \
+        "ha-scaffold:/opt/scripts/ha-scaffold.sh" \
+        "esphome-setup:/opt/scripts/esphome-setup.sh" \
+        "ha-tts:/opt/scripts/ha-tts.sh" \
+        "claude-cron:/opt/scripts/claude-cron.sh" \
+        "ha-diagnose:/opt/scripts/ha-diagnose.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -618,11 +625,19 @@ start_automation_api() {
     fi
 }
 
-# Start Claude login URL notification daemon
-start_login_notifier() {
-    if [ -f "/usr/local/bin/claude-login-notifier" ]; then
-        bashio::log.info "Starting Claude login URL notification daemon..."
-        /usr/local/bin/claude-login-notifier &
+# Start Claude Cron background daemon
+start_claude_cron() {
+    if [ -f "/usr/local/bin/claude-cron" ]; then
+        bashio::log.info "Starting Claude Cron scheduled task daemon..."
+        /usr/local/bin/claude-cron daemon &
+    fi
+}
+
+# Copy automation blueprints if blueprints directory exists
+sync_blueprints() {
+    if [ -d "/config/blueprints/automation" ] && [ -f "/opt/blueprints/claude_automation_query.yaml" ]; then
+        cp /opt/blueprints/claude_automation_query.yaml /config/blueprints/automation/claude_automation_query.yaml 2>/dev/null || true
+        bashio::log.info "Synced Claude automation blueprint to /config/blueprints/automation/"
     fi
 }
 
@@ -636,6 +651,8 @@ main() {
     configure_git
     start_automation_api
     start_login_notifier
+    start_claude_cron
+    sync_blueprints
 
     # Everything below this line used to run in the FOREGROUND before
     # exec ttyd: apk/pip installs with no timeout, and two cold starts of a

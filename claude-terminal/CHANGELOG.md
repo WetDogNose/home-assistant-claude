@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.5.1-wdn.10
+
+### ✨ New Developer Utilities & Home Assistant Tools
+- **`ha-snapshot`**: Camera vision helper script to capture camera frames (`camera.*`) via HA Supervisor API for Claude Code visual inspection.
+- **`ha-validate`**: Home Assistant YAML configuration validator via `check_config` API with `--safe-edit <file>` automatic `.bak` safety rollbacks.
+- **`ha-scaffold`**: Custom integration boilerplate generator (`manifest.json`, `config_flow.py`, `sensor.py`, `strings.json`, etc.) under `/config/custom_components/<domain>/`.
+- **`esphome-setup`**: Persistent installation helper for ESPHome CLI toolchain.
+- **`ha-tts`**: Text-to-speech announcement utility for Home Assistant media players.
+- **`claude-cron`**: Scheduled autonomous task manager executing background `claude -p` prompts and notifying via HA persistent notifications.
+- **`ha-diagnose`**: One-command health & system inspector summarizing container stats, YAML validation, entity domain counts, and recent error logs.
+- **`tmux` Helper Menu (`Ctrl+B h`)**: Quick-bar popup menu in `tmux` for fast execution of diagnostics, validation, smart context refresh, and tips.
+- **Home Assistant Blueprint**: Added `claude_automation_query.yaml` blueprint (auto-synced to `/config/blueprints/automation/`) to trigger Claude tasks via the Automation API.
+
+### 🧪 Automated Unit Test Suite & QA Guardrails
+- **Shell Unit Test Suite (`tests/test_scripts.sh`)**: Automated test runner covering CLI flags, option parsing, mock Supervisor API responses, scaffolding validation, and `claude-cron` JSON integrity.
+- **Python API Unit Test Suite (`tests/test_api_server.py`)**: `unittest` suite for `claude-api-server.py` verifying trusted IP filtering, rate limiting, and binary discovery.
+- **Local Validation Runner (`ci/local-validate.sh`)**: One-command developer check executing static linting (`shellcheck`), documentation drift check (`check-docs-drift.sh`), shell unit tests, and Python unit tests.
+- **GitHub Actions CI Workflow (`unit-tests.yml`)**: Automated CI job executing unit tests on every pull request and push to `main`.
+
 ## 2.5.1-wdn.9
 
 ### 🔒 Cleared all 132 open code scanning alerts

@@ -133,6 +133,7 @@ WORKDIR /config
 
 COPY run.sh /run.sh
 COPY scripts/ /opt/scripts/
+COPY blueprints/ /opt/blueprints/
 RUN chmod +x /run.sh /opt/scripts/*
 
 # A HEALTHCHECK is the prerequisite for a Supervisor watchdog: without one the

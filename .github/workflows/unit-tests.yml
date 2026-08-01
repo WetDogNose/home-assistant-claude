@@ -1,0 +1,35 @@
+name: Automated Unit Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Run Unit Tests & Script Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ShellCheck & Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck jq yq
+
+      - name: Run Local Validation Suite
+        run: |
+          chmod +x ci/local-validate.sh tests/test_scripts.sh claude-terminal/scripts/*.sh
+          ./ci/local-validate.sh

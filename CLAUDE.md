@@ -24,16 +24,23 @@ Shell aliases: `build-addon`, `run-addon`, `lint-dockerfile`, `test-endpoint`, `
 podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
   -t local/claude-terminal ./claude-terminal
 
-# Lint — both run in CI and must stay clean
-hadolint ./claude-terminal/Dockerfile          # error threshold; DL3006/DL3018 ignored in CI
-shellcheck -s bash -e SC1008 -e SC1091 claude-terminal/run.sh claude-terminal/scripts/*.sh
+# Run complete local validation suite (linting + docs drift + shell & python unit tests)
+./ci/local-validate.sh
 
-# Run locally + check
+# Run unit tests directly
+./tests/test_scripts.sh
+python3 -m unittest discover tests/
+
+# Lint Dockerfile & Shell scripts
+hadolint ./claude-terminal/Dockerfile          # error threshold; DL3006/DL3018 ignored in CI
+shellcheck -s bash -e SC1008 -e SC1091 -e SC2016 -e SC2129 -e SC1003 claude-terminal/run.sh claude-terminal/scripts/*.sh
+
+# Run container locally + check
 podman run -p 7681:7681 -v $(pwd)/config:/config local/claude-terminal
 curl -X GET http://localhost:7681/
 ```
 
-There is **no unit/integration test suite.** Verification is: lint + a container build + smoke tests (see CI below) + manual testing in a container. Changing behavior means running it, not running tests.
+Automated testing is available via `./ci/local-validate.sh` and runs automatically in CI on pull requests and pushes to `main`.
 
 ## Architecture
 
