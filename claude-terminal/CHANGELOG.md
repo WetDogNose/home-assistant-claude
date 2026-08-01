@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.5.1-wdn.12
+## 2.5.1-wdn.13
 
 ### 🐛 Bug scrub of the wdn.10 / wdn.11 tooling
 
@@ -16,15 +16,14 @@ what they already claimed to.
   accepts — the call failed silently behind `|| true`, so ESPHome disappeared on
   the next restart despite the script announcing it had been persisted. It now
   installs *through* `persist-install`, which does both in one step.
-- **The bundled automation blueprint was invalid YAML** — the same stray `EOF` —
-  so Home Assistant rejected it every time `run.sh` synced it into
-  `/config/blueprints/automation/`. Beyond that it pointed at
-  `http://127.0.0.1:8128/api/query`: the wrong host (from Home Assistant Core's
-  container, `127.0.0.1` is Core, not the add-on), the wrong path, and it had a
-  hardcoded empty `trigger: []`, so any automation built from it could never
-  fire. It now takes a trigger as an input, defaults to
-  `http://claude_terminal_wdn:8128/api/prompt`, and the `rest_command` it
-  depends on is documented in DOCS.md instead of being left to guesswork.
+- **The bundled automation blueprint still could not run.** wdn.12 fixed its
+  stray `EOF`, so it parses — but it kept a hardcoded empty `trigger: []`, which
+  means any automation built from it can never fire, and it pointed at
+  `http://127.0.0.1:8128/api/query`: from Home Assistant Core's container
+  `127.0.0.1` is Core rather than the add-on, and `/api/query` is not a route the
+  API server serves. It now takes a trigger as an input, defaults to
+  `http://claude_terminal_wdn:8128/api/prompt`, and the `rest_command` it depends
+  on is documented in DOCS.md instead of being left to guesswork.
 - **`claude-bot forward` never reached the API.** It posted to `/api/query`,
   which `claude-api-server.py` has never routed — every call got a 404. It also
   hardcoded port 8128, ignoring `automation_api_port`, and its help advertised a
@@ -71,9 +70,19 @@ what they already claimed to.
   ran inside `( … )` subshells, so their `FAILED` increments were discarded — 11
   of 29 assertions could print `[FAIL]` and still leave the suite exiting 0. The
   summary said 18 while 29 assertions ran.
-- Added regression coverage for the bugs above: blueprint YAML validity, agreement
-  between the API server's routes and its callers, and live-server tests for
-  endpoint routing and brute-force rate limiting.
+- Added regression coverage for the bugs above: agreement between the API
+  server's routes and its callers, and live-server tests for endpoint routing and
+  brute-force rate limiting. wdn.12's blueprint YAML check is generalised to every
+  file in `blueprints/` and given an `!input` constructor, so it tests YAML
+  validity directly rather than depending on a Ruby interpreter being present to
+  tolerate the unknown tag.
+
+## 2.5.1-wdn.12
+
+### 🐛 Fix Blueprint YAML Syntax Error
+- Fixed trailing `EOF` string in `claude_automation_query.yaml` blueprint that caused Home Assistant to fail loading the blueprint.
+- Updated `action:` key syntax for modern Home Assistant blueprint standards.
+- Added automated YAML syntax validation for all add-on blueprints to `tests/test_scripts.sh`.
 
 ## 2.5.1-wdn.11
 

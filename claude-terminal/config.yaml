@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.12"
+version: "2.5.1-wdn.13"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"

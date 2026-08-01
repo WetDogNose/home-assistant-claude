@@ -7,6 +7,10 @@ yarn-error.log
 package-lock.json
 yarn.lock
 
+# Python (running ./ci/local-validate.sh creates these next to the sources)
+__pycache__/
+*.py[cod]
+
 # Logs
 *.log
 
