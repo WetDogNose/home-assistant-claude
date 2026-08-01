@@ -63,13 +63,13 @@ claude          # start Claude Code
 claude -c       # continue the most recent conversation
 claude -r       # pick a past conversation to resume
 ha-diagnose     # one-command Home Assistant & add-on system health check
-ha-validate     # validate HA configuration via API (use --safe-edit <file> for backup safety)
+ha-validate     # validate HA configuration via API (--backup <file> before an edit, --safe-edit <file> after)
 ha-dashboard    # generate Lovelace YAML dashboard by domain or area (<domain_or_area>)
 ha-mesh         # scan Zigbee, Z-Wave & Matter mesh network health and low batteries
 ha-memory       # search HA historical event and state transitions (<entity_id> [hours])
 ha-snapshot     # capture camera image for Claude vision inspection (<camera_entity>)
 ha-scaffold     # generate boilerplate for custom integration (<domain>) or PyScript (pyscript <name>)
-ha-git-backups  # git config time-machine backup and 1-click rollback (commit|rollback)
+ha-git-backups  # git config time-machine backup and rollback (status|commit|rollback)
 ha-assist       # query HA Assist voice conversation pipeline (<prompt>)
 claude-bot      # remote messaging gateway for Telegram, Matrix, Discord (forward <prompt>)
 claude-cron     # manage autonomous background scheduled prompts (add|list|remove)
@@ -115,7 +115,7 @@ The add-on includes a built-in Automation API daemon that lets Home Assistant au
 - **Token Authentication**: All requests require an `X-API-Key` or `Authorization: Bearer` header. On first boot, if `automation_api_key` is empty, a random 32-character secret token is generated in `/data/automation_api_token`.
 - **Container Network Isolation**: Port `8128` is not exposed to the physical LAN (`ports:` is omitted in `config.yaml`). It is accessible only internally over the Home Assistant `hassio` Docker bridge network.
 - **Client IP Whitelisting**: Only calls originating from internal container subnets (`172.16-31.x.x`, `10.x.x.x`, `127.0.0.1`) are accepted.
-- **Process Mutex & Rate Limiting**: Prompts are executed sequentially (max 1 active process) with a 10 requests/minute rate limit per IP.
+- **Process Mutex & Rate Limiting**: Prompts are executed sequentially (max 1 active process) with a 10 requests/minute rate limit per IP. The limit is applied *before* authentication, so a wrong token cannot be retried indefinitely.
 - **Command Injection Safety**: Prompts are passed directly via array arguments to `subprocess.run(..., shell=False)`.
 
 ### Getting Your API Token
@@ -161,6 +161,32 @@ claude_api_token: "YOUR_32_CHAR_TOKEN"
          title: "Claude Home Audit"
          message: "{{ claude_result.content.response }}"
    ```
+
+### Using the shipped blueprint
+
+The add-on copies a **Claude Terminal Task Trigger** blueprint into
+`/config/blueprints/automation/` on start-up (when that directory exists), so it
+shows up under **Settings → Automations & scenes → Blueprints**.
+
+It calls a REST command, and Home Assistant only lets you declare those in
+`configuration.yaml`. Add this once and restart Home Assistant before using the
+blueprint:
+
+```yaml
+rest_command:
+  claude_terminal_query:
+    url: "{{ url }}"
+    method: POST
+    headers:
+      X-API-Key: "{{ token }}"
+    content_type: "application/json"
+    payload: '{"prompt": {{ prompt | to_json }}}'
+```
+
+The blueprint's default URL is `http://claude_terminal_wdn:8128/api/prompt`.
+Home Assistant Core runs in its own container, so the add-on has to be addressed
+by slug — `127.0.0.1` would point at Home Assistant itself. Change the port only
+if you changed the `automation_api_port` option.
 
 ## GitHub
 

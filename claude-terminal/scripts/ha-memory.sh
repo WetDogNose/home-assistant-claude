@@ -32,8 +32,27 @@ if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
     exit 1
 fi
 
-# Calculate start time ISO-8601
-START_TIME=$(date -u -v"-${HOURS}H" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "${HOURS} hours ago" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+if ! echo "$HOURS" | grep -qE '^[0-9]+$'; then
+    echo "Error: hours_back must be a whole number of hours (got '${HOURS}')." >&2
+    exit 1
+fi
+
+# Calculate start time ISO-8601.
+#
+# The image runs busybox date, which understands neither BSD's -v nor GNU's
+# "N hours ago". Both of the previous branches failed there, leaving START_TIME
+# empty and silently falling back to Home Assistant's own 1-day default -- so
+# hours_back was ignored on the only platform this add-on runs on. Compute the
+# epoch in the shell and let each date flavour format it.
+epoch_start=$(( $(date -u +%s) - HOURS * 3600 ))
+START_TIME=$(date -u -d "@${epoch_start}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || date -u -r "${epoch_start}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || date -u -d "${HOURS} hours ago" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || echo "")
+
+if [ -z "$START_TIME" ]; then
+    echo "Warning: could not compute a start time; using Home Assistant's default window." >&2
+fi
 
 echo "Searching history for '${FILTER}' (past ${HOURS} hours)..."
 

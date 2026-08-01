@@ -13,20 +13,20 @@ if command -v esphome >/dev/null 2>&1; then
     exit 0
 fi
 
-echo "Installing ESPHome CLI..."
-
-if command -v uv >/dev/null 2>&1; then
-    uv pip install --system --break-system-packages esphome
-else
-    pip3 install --break-system-packages esphome
-fi
-
-# Register with persist-install if available so it survives restarts
+# Delegate to persist-install when it is available: it runs the pip install AND
+# records the package in /data/persistent-packages.json, which is what makes the
+# install survive a container restart. Doing our own pip install first and then
+# "registering" afterwards is what the earlier version tried -- with a
+# subcommand (`--add-pip`) that persist-install does not accept, so the
+# registration silently failed and ESPHome vanished on the next restart.
 if command -v persist-install >/dev/null 2>&1; then
-    echo "Persisting esphome in /data/persistent-packages.json..."
-    persist-install --add-pip esphome || true
+    echo "Installing ESPHome CLI (persisted across restarts)..."
+    persist-install pip esphome
+else
+    echo "Installing ESPHome CLI..."
+    pip3 install --break-system-packages --no-cache-dir esphome
+    echo "Note: persist-install is unavailable, so ESPHome will not survive a restart."
 fi
 
 echo "ESPHome installation complete:"
 esphome version
-EOF

@@ -1,5 +1,80 @@
 # Changelog
 
+## 2.5.1-wdn.12
+
+### 🐛 Bug scrub of the wdn.10 / wdn.11 tooling
+
+Every feature added in the last two releases shipped with at least one path that
+could not work. Nothing here changes what the tools are for — it makes them do
+what they already claimed to.
+
+**Broken on arrival**
+- **`esphome-setup` always failed.** A stray `EOF` line with no heredoc above it
+  ran as a command, so the script exited 127 (`EOF: command not found`) after a
+  successful install. It also registered the package with
+  `persist-install --add-pip`, which is not a subcommand `persist-install`
+  accepts — the call failed silently behind `|| true`, so ESPHome disappeared on
+  the next restart despite the script announcing it had been persisted. It now
+  installs *through* `persist-install`, which does both in one step.
+- **The bundled automation blueprint was invalid YAML** — the same stray `EOF` —
+  so Home Assistant rejected it every time `run.sh` synced it into
+  `/config/blueprints/automation/`. Beyond that it pointed at
+  `http://127.0.0.1:8128/api/query`: the wrong host (from Home Assistant Core's
+  container, `127.0.0.1` is Core, not the add-on), the wrong path, and it had a
+  hardcoded empty `trigger: []`, so any automation built from it could never
+  fire. It now takes a trigger as an input, defaults to
+  `http://claude_terminal_wdn:8128/api/prompt`, and the `rest_command` it
+  depends on is documented in DOCS.md instead of being left to guesswork.
+- **`claude-bot forward` never reached the API.** It posted to `/api/query`,
+  which `claude-api-server.py` has never routed — every call got a 404. It also
+  hardcoded port 8128, ignoring `automation_api_port`, and its help advertised a
+  `setup` subcommand that fell through to the help text. All three fixed.
+
+**Wrong behaviour**
+- **`ha-validate --safe-edit` could not roll anything back.** It copied the file
+  to `<file>.bak` *after* the edit, so "restoring" wrote the same broken content
+  back. Rollback now needs a pre-edit snapshot: `ha-validate --backup <file>`
+  before editing, `--safe-edit` after. Without a snapshot it says so plainly
+  rather than reporting a restore that did nothing.
+- **`ha-memory` ignored its `hours_back` argument.** Both date branches (BSD
+  `-v`, GNU `-d "N hours ago"`) fail under the busybox `date` this image ships,
+  leaving the start time empty and silently falling back to Home Assistant's own
+  1-day window. The offset is now computed in the shell. Non-numeric input is
+  rejected instead of being pasted into the URL.
+- **`ha-dashboard` wrote unloadable YAML** when nothing matched, emitting a grid
+  card with an empty `cards:` key. It now stops and explains.
+
+**Safety**
+- **`ha-git-backups rollback` ran `git reset --hard HEAD~1` on `/config` with no
+  confirmation**, discarding the newest commit and every uncommitted change. It
+  now lists exactly what will be lost, requires a typed confirmation (`--yes`
+  for scripts), and refuses when there is no parent commit instead of failing
+  with a git error.
+- **The `.gitignore` it generates now excludes `secrets.yaml`**, plus
+  `known_devices.yaml`, `ip_bans.yaml` and key material. `commit` runs
+  `git add -A`, so every credential in the instance was previously written into
+  git history inside `/config`. It also sets a fallback commit identity, so
+  `commit` works without `git_user_name` / `git_user_email` configured.
+
+**Automation API hardening**
+- **Failed authentication is now rate limited.** The rate-limit check ran *after*
+  the auth check, so a wrong token never reached it — the API token could be
+  brute-forced at line speed by anything on the Docker bridge, with every attempt
+  returning a clean 401. The limiter now runs first.
+- `secrets_equal` uses `hmac.compare_digest`; the previous hand-rolled loop
+  returned early on a length mismatch and was not constant-time despite saying so.
+- A null `claude_extra_args` in `options.json` no longer raises inside the
+  request handler.
+
+**Tests**
+- **The shell suite could not fail.** The `ha-scaffold` and `claude-cron` blocks
+  ran inside `( … )` subshells, so their `FAILED` increments were discarded — 11
+  of 29 assertions could print `[FAIL]` and still leave the suite exiting 0. The
+  summary said 18 while 29 assertions ran.
+- Added regression coverage for the bugs above: blueprint YAML validity, agreement
+  between the API server's routes and its callers, and live-server tests for
+  endpoint routing and brute-force rate limiting.
+
 ## 2.5.1-wdn.11
 
 ### 🚀 Next-Gen Advanced Capability Suite
