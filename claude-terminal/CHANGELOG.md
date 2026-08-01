@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.1-wdn.4
+
+### 🎨 Visual & Branding Updates
+- Updated add-on `icon.png` and `logo.png` graphics to a modern flat vector design with a crisp Home Assistant sky blue theme.
+
 ## 2.5.1-wdn.3
 
 ### 🐛 Terminal loaded but never connected
