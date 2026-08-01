@@ -18,6 +18,14 @@ configuration:
       Opens Claude as soon as you open the terminal. Turn this off if you would
       rather land at a plain command prompt and start Claude yourself.
 
+  tmux_mouse:
+    name: Enable tmux mouse mode
+    description: >-
+      Enables tmux mouse controls (pane resizing and tmux buffer copy mode).
+      Defaults to false so native browser text selection, Ctrl+C / Cmd+C copying,
+      and direct URL clicking work seamlessly. Turn this on if you prefer
+      tmux-native mouse drag selection and pane management.
+
   require_ingress_user:
     name: Require a Home Assistant sign-in (advanced)
     description: >-

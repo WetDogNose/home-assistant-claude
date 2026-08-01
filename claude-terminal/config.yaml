@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.6"
+version: "2.5.1-wdn.7"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -45,6 +45,7 @@ panel_admin: true
 # Add-on configuration options
 options:
   auto_launch_claude: true
+  tmux_mouse: false
   require_ingress_user: false
   claude_auto_update: true
   claude_version: ""
@@ -62,6 +63,7 @@ options:
   persistent_pip_packages: []
 schema:
   auto_launch_claude: bool?
+  tmux_mouse: bool?
   # Require the X-Remote-User-Id header the ingress proxy injects.
   #
   # Defaults to FALSE, which is not the security-preferred value and is a
