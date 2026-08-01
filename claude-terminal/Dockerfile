@@ -99,7 +99,7 @@ WORKDIR /config
 
 COPY run.sh /run.sh
 COPY scripts/ /opt/scripts/
-RUN chmod +x /run.sh /opt/scripts/*.sh
+RUN chmod +x /run.sh /opt/scripts/*
 
 # A HEALTHCHECK is the prerequisite for a Supervisor watchdog: without one the
 # container reports STARTED the moment the process execs, so a watchdog would
