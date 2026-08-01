@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.1-wdn.12
+
+### 🐛 Fix Blueprint YAML Syntax Error
+- Fixed trailing `EOF` string in `claude_automation_query.yaml` blueprint that caused Home Assistant to fail loading the blueprint.
+- Updated `action:` key syntax for modern Home Assistant blueprint standards.
+- Added automated YAML syntax validation for all add-on blueprints to `tests/test_scripts.sh`.
+
 ## 2.5.1-wdn.11
 
 ### 🚀 Next-Gen Advanced Capability Suite

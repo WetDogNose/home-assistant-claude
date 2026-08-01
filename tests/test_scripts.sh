@@ -154,6 +154,16 @@ assert_exit_code 0 "$SCRIPT_DIR/claude-bot.sh" --help
 echo "12. Testing ha-git-backups.sh"
 assert_exit_code 0 "$SCRIPT_DIR/ha-git-backups.sh" --help
 
+echo "13. Testing blueprint YAML syntax"
+BLUEPRINT_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../claude-terminal/blueprints" && pwd)/claude_automation_query.yaml"
+if ruby -ryaml -e "YAML.load_file('$BLUEPRINT_FILE')" >/dev/null 2>&1 || python3 -c "import yaml; yaml.safe_load(open('$BLUEPRINT_FILE'))" >/dev/null 2>&1; then
+    echo "  [PASS] claude_automation_query.yaml syntax valid"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] claude_automation_query.yaml syntax invalid"
+    FAILED=$((FAILED + 1))
+fi
+
 echo ""
 echo "=== Shell Script Test Summary ==="
 echo "Passed: $PASSED"

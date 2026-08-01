@@ -2,7 +2,7 @@ blueprint:
   name: Claude Terminal Task Trigger
   description: >
     Triggers an autonomous task in Claude Terminal via its secure Automation API
-    endpoint when an event or schedule fires, with optional notification response.
+    endpoint when an event or schedule fires.
   domain: automation
   input:
     task_prompt:
@@ -22,19 +22,12 @@ blueprint:
       description: Token from /data/automation_api_token in Claude Terminal.
       selector:
         text:
-    notify_service:
-      name: Notification Service (Optional)
-      description: Target notification service for output (e.g. notify.notify).
-      default: notify.notify
-      selector:
-        text:
 
 trigger: []
 
 action:
-  - service: rest_command.claude_terminal_query
+  - action: rest_command.claude_terminal_query
     data:
       url: !input api_url
       token: !input api_token
       prompt: !input task_prompt
-EOF
