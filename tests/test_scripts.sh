@@ -298,6 +298,43 @@ else
     FAILED=$((FAILED + 1))
 fi
 
+echo "16. Testing blueprint loop guards and install-once behaviour"
+
+# An automation built from this blueprint can act on Home Assistant, and its
+# actions produce events -- so a trigger on HA's own output can re-fire on the
+# previous run's consequences. mode: single bounds the pile-up and
+# max_exceeded: silent stops the drop from logging a warning, which would
+# itself be an event such a trigger could fire on.
+BP="$BLUEPRINT_DIR/claude_automation_query.yaml"
+for key in '^mode: single$' '^max_exceeded: silent$'; do
+    if grep -qE "$key" "$BP"; then
+        echo "  [PASS] blueprint declares ${key//[\^$]/}"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] blueprint is missing ${key//[\^$]/} (feedback-loop guard)"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+# The blueprint used to be re-copied into /config on every start, which meant a
+# user could not delete it (it came back) and could not harden it (edits were
+# reverted). Guard the shape of the fix, not just its presence.
+if grep -q '^install_blueprint()' "$RUN_SH" && ! grep -q 'sync_blueprints' "$RUN_SH"; then
+    echo "  [PASS] run.sh installs the blueprint via install_blueprint"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] run.sh should define install_blueprint and no longer reference sync_blueprints"
+    FAILED=$((FAILED + 1))
+fi
+
+if grep -q 'blueprint-baseline' "$RUN_SH"; then
+    echo "  [PASS] blueprint install records a baseline so edits and deletions stick"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] run.sh does not record a blueprint baseline; edits/deletions can be clobbered"
+    FAILED=$((FAILED + 1))
+fi
+
 echo ""
 echo "=== Shell Script Test Summary ==="
 echo "Passed: $PASSED"

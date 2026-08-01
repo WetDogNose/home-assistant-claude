@@ -51,6 +51,57 @@ installed are cleared: a skill you wrote yourself under `~/.claude/skills/` is
 left alone, including one sharing a name with a bundled skill, which wins and is
 kept with a warning in the log.
 
+### 🛡️ The bundled blueprint stops rewriting the user's config
+
+`sync_blueprints` copied `claude_automation_query.yaml` into
+`/config/blueprints/automation/` on **every add-on start**. Three consequences,
+all bad and none obvious:
+
+- **You could not decline it.** Delete the blueprint and it reappeared at the
+  next restart.
+- **You could not harden it.** Any local edit was silently reverted on the next
+  restart.
+- **It showed up as untracked churn** in any git repository kept over `/config`
+  — which this add-on actively encourages via `ha-git-backups`.
+
+It is now installed **once**, with a baseline copy recorded in
+`/data/.blueprint-baseline.yaml`. A later release updates the file only when it
+still matches that baseline, an edited file is left alone, and a deleted one is
+not recreated (remove the baseline to opt back in). Upgrading from an earlier
+version overwrites once and records the baseline, which cannot lose an edit —
+the old behaviour guaranteed the file was the shipped content at every boot.
+
+The path is deliberately **not** moved into a vendor subdirectory: automations
+reference a blueprint by path, so relocating it would break every automation
+already built from it.
+
+### 🔁 Feedback-loop guards on the blueprint
+
+An automation built from this blueprint makes Claude act on Home Assistant, and
+those actions produce state changes, logbook entries and log records. A trigger
+fired by Home Assistant's own output can therefore re-fire on the previous run's
+consequences and keep going.
+
+- `mode: single` drops a run that arrives while one is still executing.
+- `max_exceeded: silent` stops that drop from writing a warning — the warning is
+  itself a log record, and would be fuel for exactly the loop the guard exists
+  to stop.
+- The blueprint description now names the trigger types to avoid
+  (`system_log_event`, error log, logbook, bare `state_changed`) and states what
+  the Automation API's own limits do and don't cover: 10 requests/minute per
+  caller and a single-execution mutex bound how often Claude actually runs, but
+  not how often a runaway trigger fires.
+
+Deliberately **no** template-based cooldown condition: a condition that can
+raise (an unset `last_triggered`, a missing entity) logs an error on every
+evaluation, which is the same hazard wearing a different costume. Both guards
+are declarative and cannot fail.
+
+The `rest_command.claude_terminal_query` dependency is unchanged — Home
+Assistant only allows `rest_command` in `configuration.yaml`, so a blueprint
+cannot define it — but the description now states plainly that the automation
+fails with an unknown-service error without it.
+
 ### 🧪 The skills can't drift away from the tools
 
 A skill describing a command that no longer exists is worse than no skill —

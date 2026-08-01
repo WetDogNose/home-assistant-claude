@@ -700,11 +700,62 @@ start_claude_cron() {
     fi
 }
 
-# Copy automation blueprints if blueprints directory exists
-sync_blueprints() {
-    if [ -d "/config/blueprints/automation" ] && [ -f "/opt/blueprints/claude_automation_query.yaml" ]; then
-        cp /opt/blueprints/claude_automation_query.yaml /config/blueprints/automation/claude_automation_query.yaml 2>/dev/null || true
-        bashio::log.info "Synced Claude automation blueprint to /config/blueprints/automation/"
+# Install the automation blueprint into the user's Home Assistant config.
+#
+# This used to `cp` over the destination on EVERY start, which is wrong in
+# three separate ways: a user who deleted the blueprint got it back at the next
+# restart with no way to decline, a user who hardened it had their edits
+# silently reverted, and the file reappeared as untracked churn in any git
+# repository kept over /config (which `ha-git-backups` encourages).
+#
+# It is now installed once and then left alone. A baseline copy of exactly what
+# was installed lets a later release update a file nobody has touched while
+# leaving an edited one intact — and a destination that is missing while the
+# baseline exists means the user removed it deliberately, so it is not
+# recreated.
+#
+# The path is deliberately NOT moved into a vendor subdirectory. Automations
+# reference a blueprint by its path, so relocating it would break every
+# automation already built from it.
+install_blueprint() {
+    local src="/opt/blueprints/claude_automation_query.yaml"
+    local dest="/config/blueprints/automation/claude_automation_query.yaml"
+    local baseline="/data/.blueprint-baseline.yaml"
+
+    [ -f "$src" ] || return 0
+    [ -d "/config/blueprints/automation" ] || return 0
+
+    local action="install"
+    if [ -f "$dest" ]; then
+        if [ ! -f "$baseline" ]; then
+            # Upgrading from a version that re-copied on every boot, so whatever
+            # is on disk IS the shipped content — overwriting cannot lose an
+            # edit that could have survived the previous behaviour.
+            action="update"
+        elif cmp -s "$dest" "$baseline"; then
+            action="update"
+        else
+            action="keep-edited"
+        fi
+    elif [ -f "$baseline" ]; then
+        action="keep-deleted"
+    fi
+
+    case "$action" in
+        keep-edited)
+            bashio::log.info "Automation blueprint has local edits; leaving ${dest} untouched"
+            return 0
+            ;;
+        keep-deleted)
+            bashio::log.info "Automation blueprint was removed; not reinstalling it (delete ${baseline} to get it back)"
+            return 0
+            ;;
+    esac
+
+    if cp "$src" "$dest" 2>/dev/null && cp "$src" "$baseline" 2>/dev/null; then
+        bashio::log.info "Automation blueprint ${action} complete: ${dest}"
+    else
+        bashio::log.warning "Could not write the automation blueprint to ${dest}"
     fi
 }
 
@@ -720,7 +771,7 @@ main() {
     start_automation_api
     start_login_notifier
     start_claude_cron
-    sync_blueprints
+    install_blueprint
 
     # Everything below this line used to run in the FOREGROUND before
     # exec ttyd: apk/pip installs with no timeout, and two cold starts of a
