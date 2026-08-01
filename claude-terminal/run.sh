@@ -162,6 +162,59 @@ setup_commands() {
         || echo "unknown" > /opt/scripts/addon-version
 }
 
+# Install the bundled Claude Code skills that document this add-on's tooling.
+#
+# Claude Code reads user skills from $HOME/.claude/skills/<name>/SKILL.md, and
+# HOME is /data — which persists. A skill copied there once would therefore
+# outlive the release that shipped it: a renamed or withdrawn skill would keep
+# describing commands that no longer exist, and an edited one would never pick
+# up the new text. These are reproducible artifacts of the image (same argument
+# as .tmux.conf), so the shipped set is resynced on every boot.
+#
+# Each installed directory is marked, and only marked directories are cleared
+# before the resync. That is what lets a withdrawn skill actually disappear
+# while anything the user wrote themselves under ~/.claude/skills is left
+# alone — including a hand-written skill that happens to share a name, which is
+# skipped with a warning rather than overwritten.
+install_skills() {
+    local src="/opt/skills"
+    local dest="${HOME}/.claude/skills"
+    local marker=".claude-terminal-managed"
+
+    [ -d "$src" ] || return 0
+
+    if ! mkdir -p "$dest"; then
+        bashio::log.warning "Could not create ${dest}; skipping skill installation"
+        return 0
+    fi
+
+    local existing
+    for existing in "$dest"/*/; do
+        [ -f "${existing}${marker}" ] || continue
+        rm -rf "$existing"
+    done
+
+    local skill name count=0
+    for skill in "$src"/*/; do
+        [ -f "${skill}SKILL.md" ] || continue
+        name=$(basename "$skill")
+
+        if [ -e "$dest/$name" ]; then
+            bashio::log.warning "Skill '${name}' exists in ${dest} and is not add-on managed; leaving it alone"
+            continue
+        fi
+
+        if cp -r "$skill" "$dest/$name" 2>/dev/null; then
+            touch "$dest/$name/$marker"
+            count=$((count + 1))
+        else
+            bashio::log.warning "Failed to install skill: ${name}"
+        fi
+    done
+
+    bashio::log.info "Installed ${count} Claude Code skills into ${dest}"
+}
+
 # Keep Claude Code current. The bundled copy in the image is frozen at build
 # time, so install the official native build into /data (persists across
 # restarts and add-on updates) and refresh it in the background on each
@@ -661,6 +714,7 @@ main() {
 
     init_environment
     setup_commands
+    install_skills
     update_claude
     configure_git
     start_automation_api

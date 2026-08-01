@@ -84,6 +84,26 @@ persist-install apk htop   # install packages that survive restarts
 ha-context      # refresh the Home Assistant context file
 ```
 
+### Built-in skills
+
+Claude doesn't have to be told how these commands work — the add-on ships a set of **skills** describing its own tooling, installed into `~/.claude/skills/` at startup and loaded on demand when a request matches.
+
+In practice that means you can ask for the outcome instead of the command: "why did the hall sensor stop reporting?", "make me a dashboard for the upstairs lights", "have Home Assistant ask Claude for an energy summary every morning". Claude picks up the relevant skill and uses the right tool with the right flags.
+
+| Skill | Covers |
+|---|---|
+| `ha-config-safety` | Editing `/config` without breaking it — `ha-validate`, `ha-git-backups` |
+| `ha-diagnostics` | `ha-diagnose`, `ha-mesh`, `claude-doctor` |
+| `ha-history` | `ha-memory` and the history API |
+| `ha-dashboards` | `ha-dashboard` and Lovelace YAML |
+| `ha-integration-dev` | `ha-scaffold`, `esphome-setup`, `persist-install` |
+| `ha-camera-vision` | `ha-snapshot` |
+| `ha-announce` | `ha-tts`, `ha-notify`, `ha-assist` |
+| `claude-automation-api` | The Automation API, the shipped blueprint, `claude-bot` |
+| `claude-scheduled-tasks` | `claude-cron` |
+
+The shipped set is refreshed on every add-on start, so updates take effect and withdrawn skills are removed. Skills you write yourself in `~/.claude/skills/` are left untouched — including one that happens to share a name with a bundled skill, which wins and is kept.
+
 ### Terminal tips
 
 - **Automatic Login Notifications**: When Claude Code displays an OAuth authorization link, a Home Assistant persistent notification is automatically sent to the notification drawer with a direct clickable link (`[👉 Authorize Claude Code]`).

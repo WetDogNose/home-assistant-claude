@@ -320,6 +320,27 @@ This add-on runs an Automation API server allowing Home Assistant automations, s
 - **Payload Schema**: `{"prompt": "Your prompt text", "timeout": 120}`
 - **Response Schema**: `{"success": true, "response": "Output text", "duration_seconds": 3.42, "exit_code": 0}`
 - **Security Controls**: Internal container bridge network isolation, IP subnet filtering, single-process mutex lock, rate-limiting (10 req/min), and safe parameterized subprocess execution.
+
+## Add-on Skills
+
+This add-on ships skills describing its own Home Assistant tooling, installed in
+`~/.claude/skills/`. They load on demand — consult the matching one instead of
+reconstructing a command's behaviour from `--help`:
+
+| Skill | Covers |
+|---|---|
+| `ha-config-safety` | Editing `/config` safely: `ha-validate`, `ha-git-backups` |
+| `ha-diagnostics` | `ha-diagnose`, `ha-mesh`, `claude-doctor` |
+| `ha-history` | `ha-memory` and the history API |
+| `ha-dashboards` | `ha-dashboard`, Lovelace YAML |
+| `ha-integration-dev` | `ha-scaffold`, `esphome-setup`, `persist-install` |
+| `ha-camera-vision` | `ha-snapshot` |
+| `ha-announce` | `ha-tts`, `ha-notify`, `ha-assist` |
+| `claude-automation-api` | The Automation API, blueprint, `claude-bot` |
+| `claude-scheduled-tasks` | `claude-cron` |
+
+Anything under `/config` is the user's live home. Validate before reloading, and
+prefer reloading a single integration over restarting Home Assistant.
 APIREF
 
     # Atomic move

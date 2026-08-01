@@ -37,6 +37,29 @@ exit $rc
 IN
 then rc=1; fi
 
+# Skills are what tell the Claude session inside the add-on how its own tooling
+# works. A skill missing from the image fails silently -- Claude simply never
+# learns the command exists -- so the shipped set is asserted here rather than
+# left to be noticed in use.
+echo "== skills are present =="
+if ! run <<'IN'
+rc=0
+for s in ha-config-safety ha-diagnostics ha-history ha-dashboards \
+         ha-integration-dev ha-camera-vision ha-announce \
+         claude-automation-api claude-scheduled-tasks; do
+  f="/opt/skills/$s/SKILL.md"
+  if [ ! -f "$f" ]; then echo "FAIL: $f missing"; rc=1; continue; fi
+  # The frontmatter is the whole triggering mechanism: no name/description and
+  # the skill is inert even though the file shipped.
+  if ! head -1 "$f" | grep -q '^---$'; then echo "FAIL: $s has no frontmatter"; rc=1; continue; fi
+  if ! grep -q "^name: ${s}$" "$f"; then echo "FAIL: $s name does not match its directory"; rc=1; continue; fi
+  if ! grep -q '^description: .' "$f"; then echo "FAIL: $s has no description"; rc=1; continue; fi
+  echo "OK: $s"
+done
+exit $rc
+IN
+then rc=1; fi
+
 # ldd resolves relocations WITHOUT executing, so it is safe under qemu-user
 # where running a JIT binary is not. This is the check that catches a binary
 # that is present, +x, and aborts on exec.

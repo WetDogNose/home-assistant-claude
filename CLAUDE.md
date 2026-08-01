@@ -50,17 +50,19 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
 - **build.yaml** — base images per arch (amd64, aarch64) + OCI labels, consumed by `home-assistant/builder`
 - **run.sh** — the boot path: environment/persistence setup, background Claude update, ttyd launch
 - **scripts/** — copied to `/opt/scripts/`; `run.sh` installs most of them into `/usr/local/bin` under friendlier names
+- **skills/** — Claude Code skills documenting the add-on's own tooling; copied to `/opt/skills/`, synced into `$HOME/.claude/skills` at boot. Read, never executed, so they need no `+x`
 
 ### Container execution flow (`run.sh` `main()`)
 1. `init_environment` — point HOME/XDG at `/data` (persistent), prepend `/data/home/.local/bin` to PATH, clean legacy npm cache, migrate legacy credentials, install `.tmux.conf`
 2. `setup_commands` — install `welcome`, `persist-install`, `ha-context`, `claude-doctor` (health-check.sh), `claude-login-url`, `github-setup`, `claude-api-server` into `/usr/local/bin`; write the add-on version to `/opt/scripts/addon-version`
-3. `update_claude` — validate/repair the persistent native install, then background install/update into `/data`
-4. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`)
-5. `configure_git` — sets global commit identity, configures `gh auth setup-git` if GitHub credentials exist
-6. `start_automation_api` — auto-generates `/data/automation_api_token` if empty and launches background HTTP daemon (`claude-api-server.py`) on port 8128
-7. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
-8. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`
-9. `start_web_terminal` — `exec ttyd ... tmux new-session -A -s claude 'claude [flags]'` (or `welcome --shell` when `auto_launch_claude: false`)
+3. `install_skills` — resync `/opt/skills/` into `$HOME/.claude/skills/`
+4. `update_claude` — validate/repair the persistent native install, then background install/update into `/data`
+5. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`)
+6. `configure_git` — sets global commit identity, configures `gh auth setup-git` if GitHub credentials exist
+7. `start_automation_api` — auto-generates `/data/automation_api_token` if empty and launches background HTTP daemon (`claude-api-server.py`) on port 8128
+8. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
+9. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`
+10. `start_web_terminal` — `exec ttyd ... tmux new-session -A -s claude 'claude [flags]'` (or `welcome --shell` when `auto_launch_claude: false`)
 
 ### Key design rules
 - **Nothing on the boot path may hit the network or block on input.** Network work (updates, context generation, MCP pre-warm) is backgrounded; packages ship in the image.
@@ -74,6 +76,7 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
   2. **Boot time** — `run.sh` probes with `timeout 10 claude --version` and deletes the persistent install if it fails, **unconditionally, even when `claude_auto_update` is off**, and again after any background update.
   3. **Launch time** — `claude-launch` re-probes on every ttyd connection, falls back to the bundled copy, and degrades to `welcome --shell` with an explanation. ttyd resolves its command per connection while the boot guard runs once, so a self-update *after* boot is only covered here.
   Don't regress any of these into a bare `-x` check — presence was never the failing property.
+- **Skills are shipped state, not user state.** `install_skills` clears and re-copies the bundled set on every boot, because `$HOME` is `/data` and anything written there once would otherwise outlive the release that shipped it — a withdrawn skill would keep describing commands that no longer exist. Only directories carrying `.claude-terminal-managed` are cleared, so a user's own skill (including one sharing a bundled name, which is then skipped with a warning) is never touched. A skill that documents a command must not outlive that command: `tests/test_scripts.sh` fails when a skill names a command `setup_commands` does not install.
 - **Never let a non-essential step kill startup.** `set -e` is on, so intentional non-zero returns must be captured (`ensure_native_claude_usable || native_usable=$?`), not left bare.
 - **No custom session UI.** tmux `new-session -A` handles reconnects; Claude Code's own `-c`/`-r` handle continue/resume.
 
@@ -108,7 +111,7 @@ All options are read via `bashio::config` (from `/data/options.json`):
 ## CI & Release
 
 Workflows in `.github/workflows/`:
-- **build-test.yml** (PRs touching `claude-terminal/**`) — hadolint + amd64/aarch64 builds, then amd64 smoke tests asserting specific scripts are executable and specific binaries exist. **Adding a script to `scripts/` or a required binary means updating the lists in this workflow.**
+- **build-test.yml** (PRs touching `claude-terminal/**`) — hadolint + amd64/aarch64 builds, then amd64 smoke tests asserting specific scripts are executable, specific binaries exist, and every bundled skill shipped with valid frontmatter. **Adding a script to `scripts/`, a skill to `skills/`, or a required binary means updating the lists in `ci/smoke.sh`.**
 - **shellcheck.yml** (PRs touching `*.sh`) — severity `warning`, `-e SC1008 -e SC1091`
 - **security-scan.yml** — Trivy against the built image, on `claude-terminal/**` PRs, pushes to main and weekly. Reports HIGH/CRITICAL to the job summary, publishes **all** severities to the Security tab (the action ignores `severity:` for SARIF), and **fails** on a HIGH/CRITICAL that already has a fixed package — the one class a rebuild can act on. It is a gate, not a report: 132 alerts once accumulated across an entirely green history.
 - **publish-images.yml** — on `v*` tags (and manual dispatch), builds and pushes `ghcr.io/wetdognose/{arch}-addon-claude-terminal` via `home-assistant/builder` (pinned). The Supervisor pulls these; it does not build locally.

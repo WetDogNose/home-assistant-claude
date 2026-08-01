@@ -134,6 +134,10 @@ WORKDIR /config
 COPY run.sh /run.sh
 COPY scripts/ /opt/scripts/
 COPY blueprints/ /opt/blueprints/
+# Claude Code skills describing this add-on's own tooling. run.sh syncs them
+# into $HOME/.claude/skills at boot; they are read, never executed, so unlike
+# /opt/scripts they do not need to be +x.
+COPY skills/ /opt/skills/
 RUN chmod +x /run.sh /opt/scripts/*
 
 # A HEALTHCHECK is the prerequisite for a Supervisor watchdog: without one the
