@@ -5,7 +5,7 @@
 # the raw option name reappears in the Home Assistant UI, so a rename degrades
 # the interface with no error anywhere.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 rc=0
 
 schema=$(ruby -ryaml -e 'puts YAML.load_file("claude-terminal/config.yaml")["schema"].keys' 2>/dev/null \

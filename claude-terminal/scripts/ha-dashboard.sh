@@ -44,8 +44,13 @@ fi
 # Filter entities matching target domain or area
 MATCHING_ENTITIES=$(echo "$STATES" | jq -r --arg t "$TARGET" '.[] | select((.entity_id | startswith($t + ".")) or (.attributes.area_id == $t)) | .entity_id')
 
+# A grid card with an empty `cards:` key is not valid Lovelace YAML, so writing
+# the file anyway produced a dashboard Home Assistant refuses to load. Stop
+# before creating it and say why.
 if [ -z "$MATCHING_ENTITIES" ]; then
-    echo "Warning: No entities matching '${TARGET}' found." >&2
+    echo "Error: no entities matching '${TARGET}' found; nothing to generate." >&2
+    echo "Pass an entity domain (light, climate, sensor, ...) or an area id." >&2
+    exit 1
 fi
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"

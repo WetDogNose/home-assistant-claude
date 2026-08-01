@@ -1,10 +1,37 @@
 blueprint:
   name: Claude Terminal Task Trigger
   description: >
-    Triggers an autonomous task in Claude Terminal via its secure Automation API
-    endpoint when an event or schedule fires.
+    Triggers an autonomous task in Claude Terminal via its Automation API when
+    an event or schedule fires.
+
+
+    This blueprint calls a REST command, which Home Assistant only lets you
+    define in `configuration.yaml`. Add this once, then restart Home Assistant:
+
+
+    ```yaml
+
+    rest_command:
+      claude_terminal_query:
+        url: "{{ url }}"
+        method: POST
+        headers:
+          X-API-Key: "{{ token }}"
+        content_type: "application/json"
+        payload: '{"prompt": {{ prompt | to_json }}}'
+    ```
+
+
+    The API token is in `/data/automation_api_token` inside the add-on (run
+    `cat /data/automation_api_token` in the Claude Terminal), or whatever you
+    set as the `automation_api_key` option.
   domain: automation
   input:
+    automation_trigger:
+      name: Trigger
+      description: What should start the Claude task.
+      selector:
+        trigger:
     task_prompt:
       name: Claude Task Prompt
       description: The instruction/prompt to send to Claude Code.
@@ -13,8 +40,12 @@ blueprint:
           multiline: true
     api_url:
       name: Automation API URL
-      description: The endpoint URL of the Claude Terminal Automation API.
-      default: "http://127.0.0.1:8128/api/query"
+      description: >
+        Endpoint URL of the Claude Terminal Automation API. Home Assistant Core
+        runs in its own container, so this must address the add-on by its slug
+        on the Docker network -- 127.0.0.1 would be Home Assistant itself.
+        Change the port only if you changed the `automation_api_port` option.
+      default: "http://claude_terminal_wdn:8128/api/prompt"
       selector:
         text:
     api_token:
@@ -22,10 +53,13 @@ blueprint:
       description: Token from /data/automation_api_token in Claude Terminal.
       selector:
         text:
+          type: password
 
-trigger: []
+# The trigger is supplied by the user through the input above; an automation
+# with a hardcoded empty trigger list can never fire.
+triggers: !input automation_trigger
 
-action:
+actions:
   - action: rest_command.claude_terminal_query
     data:
       url: !input api_url

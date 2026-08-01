@@ -14,6 +14,7 @@ Security controls:
 """
 
 import argparse
+import hmac
 import http.server
 import json
 import logging
@@ -24,7 +25,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 # Logging setup
 logging.basicConfig(
@@ -171,21 +172,27 @@ class AutomationApiHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(403, {"error": "Forbidden: Client IP not allowed"})
             return
 
-        # 2. Authentication check
+        # 2. Rate limit check.
+        #
+        # This runs BEFORE authentication on purpose. With the order reversed,
+        # failed auth never reached the limiter, so the token could be
+        # brute-forced at line speed from any co-resident add-on on the Docker
+        # bridge -- every attempt got a clean 401 and the limiter only ever saw
+        # requests that had already presented the correct token.
+        if not check_rate_limit(client_ip):
+            logger.warning(f"Rate limit exceeded for {client_ip}")
+            self.send_json_response(429, {"error": "Too Many Requests: Rate limit exceeded (max 10/min)"})
+            return
+
+        # 3. Authentication check
         if not self.verify_auth():
             logger.warning(f"Unauthorized POST request to {self.path} from {client_ip}")
             self.send_json_response(401, {"error": "Unauthorized: Invalid or missing API key"})
             return
 
-        # 3. Path check
+        # 4. Path check
         if self.path not in ("/api/prompt", "/prompt"):
             self.send_json_response(404, {"error": "Endpoint not found"})
-            return
-
-        # 4. Rate limit check
-        if not check_rate_limit(client_ip):
-            logger.warning(f"Rate limit exceeded for {client_ip}")
-            self.send_json_response(429, {"error": "Too Many Requests: Rate limit exceeded (max 10/min)"})
             return
 
         # 5. Payload size check
@@ -240,13 +247,14 @@ class AutomationApiHandler(http.server.BaseHTTPRequestHandler):
 
 
 def secrets_equal(val1: str, val2: str) -> bool:
-    """Constant-time string comparison to prevent timing attacks."""
-    if len(val1) != len(val2):
-        return False
-    result = 0
-    for c1, c2 in zip(val1, val2):
-        result |= ord(c1) ^ ord(c2)
-    return result == 0
+    """Constant-time string comparison to prevent timing attacks.
+
+    hmac.compare_digest rather than a hand-rolled loop: the previous version
+    returned early on a length mismatch and compared character by character in
+    interpreted Python, so it leaked the token length and was not actually
+    constant-time.
+    """
+    return hmac.compare_digest(val1.encode("utf-8"), val2.encode("utf-8"))
 
 
 def run_claude_prompt(prompt: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> dict:
@@ -260,7 +268,9 @@ def run_claude_prompt(prompt: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> di
     if options.get("dangerously_skip_permissions") is True:
         cmd.append("--dangerously-skip-permissions")
 
-    extra_args = options.get("claude_extra_args", "").strip()
+    # `or ""`: an option present but null in options.json yields None here, and
+    # None.strip() would raise inside the request handler.
+    extra_args = (options.get("claude_extra_args") or "").strip()
     if extra_args:
         try:
             cmd.extend(shlex.split(extra_args))
