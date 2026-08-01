@@ -92,6 +92,14 @@ jobs:
             echo "No HIGH or CRITICAL vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # NOTE: the `severity` input does not apply to SARIF output. The action
+      # logs "Building SARIF report with all severities" and ignores it unless
+      # limit-severities-for-sarif is set, so the Security tab receives
+      # UNKNOWN/LOW/MEDIUM as well. That is deliberate and left as-is -- the
+      # tab should hold the complete picture. It does mean the job summary
+      # above (HIGH/CRITICAL only) can read clean while the tab is not, which
+      # is how 132 alerts accumulated unnoticed; the gate below is what closes
+      # that gap.
       - name: Run Trivy (SARIF for Security tab)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -112,3 +120,27 @@ jobs:
         continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
+
+      # The gate. Everything above reports; nothing above fails, which is why
+      # the alert count could climb to 132 across a green history.
+      #
+      # Runs LAST so a red gate still leaves a refreshed Security tab and a
+      # populated job summary behind it -- a failing scan you cannot read is
+      # worse than no gate at all.
+      #
+      # ignore-unfixed is the whole reason this is safe to make fatal: it fails
+      # only on a HIGH/CRITICAL that Alpine has ALREADY published a fixed
+      # package for, which is by definition actionable -- the Dockerfile runs
+      # `apk upgrade`, so a rebuild picks the fix up on its own. A CVE with no
+      # upstream fix cannot be actioned from this repository and must not block
+      # an unrelated pull request; those stay visible in the summary and the
+      # Security tab instead.
+      - name: Fail on fixable HIGH/CRITICAL
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: scan/claude-terminal:latest
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
