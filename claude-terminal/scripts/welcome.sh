@@ -32,6 +32,7 @@ echo -e "  ${WHITE}claude-doctor${NC}     diagnose network, auth, and environmen
 echo -e "  ${WHITE}github-setup${NC}      sign in to GitHub so Claude can manage your repos"
 echo -e "  ${WHITE}persist-install${NC}   install apk/pip packages that survive restarts"
 echo -e "  ${WHITE}ha-context${NC}        refresh the Home Assistant context file for Claude"
+echo -e "  ${DIM}Claude knows these tools — just ask for the outcome (skills in ~/.claude/skills)${NC}"
 echo -e "  ${DIM}Tip: Press Ctrl+B then 'h' inside tmux for the HA Helper Menu${NC}"
 echo ""
 

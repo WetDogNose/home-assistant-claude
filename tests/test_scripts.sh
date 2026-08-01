@@ -220,6 +220,84 @@ for caller in "$SCRIPT_DIR/claude-bot.sh" "$BLUEPRINT_DIR/claude_automation_quer
     fi
 done
 
+echo "15. Testing bundled Claude Code skills"
+SKILLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../claude-terminal/skills" && pwd)"
+RUN_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../claude-terminal" && pwd)/run.sh"
+DOCKERFILE="$(dirname "$RUN_SH")/Dockerfile"
+
+# A skill is inert without frontmatter, and Claude matches on `name`, so a name
+# that disagrees with the directory produces a skill that can be listed but not
+# reliably invoked.
+for skill_dir in "$SKILLS_DIR"/*/; do
+    skill_name=$(basename "$skill_dir")
+    skill_file="${skill_dir}SKILL.md"
+
+    if [ ! -f "$skill_file" ]; then
+        echo "  [FAIL] $skill_name has no SKILL.md"
+        FAILED=$((FAILED + 1))
+        continue
+    fi
+
+    if [ "$(head -n 1 "$skill_file")" != "---" ] \
+        || ! grep -q "^name: ${skill_name}$" "$skill_file" \
+        || ! grep -q '^description: .' "$skill_file"; then
+        echo "  [FAIL] $skill_name has malformed frontmatter (need ---, name: $skill_name, description:)"
+        FAILED=$((FAILED + 1))
+        continue
+    fi
+
+    echo "  [PASS] $skill_name frontmatter is well formed"
+    PASSED=$((PASSED + 1))
+done
+
+# The skills exist to tell Claude which commands are available, so a skill
+# naming a command the add-on does not install is worse than no skill at all:
+# it sends Claude confidently at a command that is not there. Keep the two in
+# step by checking every ha-/claude-/esphome-/persist- token in a skill against
+# what setup_commands actually puts in /usr/local/bin.
+INSTALLED_COMMANDS=$(grep -oE '"[a-z0-9-]+:/opt/scripts/' "$RUN_SH" | sed 's/"//; s/:.*//')
+SKILL_NAMES=$(basename -a "$SKILLS_DIR"/*/)
+KNOWN_NAMES=$(printf '%s\n%s\n' "$INSTALLED_COMMANDS" "$SKILL_NAMES" | sort -u)
+
+for skill_dir in "$SKILLS_DIR"/*/; do
+    skill_name=$(basename "$skill_dir")
+    [ -f "${skill_dir}SKILL.md" ] || continue
+
+    # A token preceded by "/" is a path component (/config/claude-snapshots),
+    # not a command being invoked, so it is excluded rather than reported as a
+    # command that does not exist.
+    unknown=$(grep -oE '(^|[^/[:alnum:]_-])(ha|claude|esphome|persist)-[a-z-]+[a-z]' "${skill_dir}SKILL.md" \
+        | sed -E 's/^[^a-z]+//' | sort -u | while read -r token; do
+            echo "$KNOWN_NAMES" | grep -qx "$token" || echo "$token"
+        done)
+
+    if [ -z "$unknown" ]; then
+        echo "  [PASS] $skill_name references only installed commands"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $skill_name references unknown command(s): $(echo "$unknown" | tr '\n' ' ')"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+# Shipping the skills without wiring them in is the silent failure this catches:
+# the files are in the repo, the image copies nothing, and Claude never sees them.
+if grep -q '^COPY skills/ /opt/skills/$' "$DOCKERFILE"; then
+    echo "  [PASS] Dockerfile copies skills/ into the image"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] Dockerfile does not COPY skills/ into /opt/skills/"
+    FAILED=$((FAILED + 1))
+fi
+
+if grep -q '^    install_skills$' "$RUN_SH"; then
+    echo "  [PASS] run.sh main() installs skills at boot"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] run.sh main() does not call install_skills"
+    FAILED=$((FAILED + 1))
+fi
+
 echo ""
 echo "=== Shell Script Test Summary ==="
 echo "Passed: $PASSED"

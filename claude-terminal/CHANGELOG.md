@@ -1,5 +1,72 @@
 # Changelog
 
+## 2.5.1-wdn.14
+
+### 🧠 Claude now knows how to use the add-on's own tools
+
+Everything added since wdn.5 — `ha-validate`, `ha-mesh`, `ha-memory`,
+`ha-dashboard`, `ha-scaffold`, `ha-snapshot`, `ha-tts`, `ha-assist`,
+`ha-git-backups`, `claude-cron`, `claude-bot`, the Automation API — was
+reachable only if the user already knew the command existed and typed it. Claude
+sitting in the same terminal had no idea any of it was there, and would answer
+"when did the back door last unlock?" by hand-rolling a `curl` against the
+history API instead of running `ha-memory`.
+
+Nine Claude Code **skills** now ship with the add-on, installed into
+`~/.claude/skills/` at startup and loaded on demand when a request matches:
+
+| Skill | Covers |
+|---|---|
+| `ha-config-safety` | Safe `/config` edits: `ha-validate`, `ha-git-backups` |
+| `ha-diagnostics` | `ha-diagnose`, `ha-mesh`, `claude-doctor` |
+| `ha-history` | `ha-memory` and the history API |
+| `ha-dashboards` | `ha-dashboard`, Lovelace YAML |
+| `ha-integration-dev` | `ha-scaffold`, `esphome-setup`, `persist-install` |
+| `ha-camera-vision` | `ha-snapshot` |
+| `ha-announce` | `ha-tts`, `ha-notify`, `ha-assist` |
+| `claude-automation-api` | Automation API, the shipped blueprint, `claude-bot` |
+| `claude-scheduled-tasks` | `claude-cron` |
+
+The practical effect is that you can ask for the outcome rather than the
+command: *"why did the hall sensor stop reporting?"*, *"make me a dashboard for
+the upstairs lights"*, *"have Home Assistant ask Claude for an energy summary
+each morning"*.
+
+They also carry the operational knowledge that is not in any `--help` text, and
+which wdn.13 spent a whole release discovering: that `ha-validate --backup` has
+to run *before* the edit or the rollback restores the broken file; that
+`check_config` validates the whole instance, so an unrelated pre-existing error
+will roll back a good edit unless you check the baseline first; that
+`/api/query` is not a route; that from Home Assistant Core's container the
+Automation API is `claude_terminal_wdn:8128`, not `127.0.0.1`; that
+`ha-git-backups rollback` destroys uncommitted work; and that `area_id` is
+usually absent from the REST states payload, so `ha-dashboard <area>` finds
+nothing and the area has to be resolved through the template endpoint.
+
+**Skills are shipped state, not user state.** `/data` persists, so a skill
+copied there once would outlive the release that shipped it — a withdrawn skill
+would go on describing commands that no longer exist. The bundled set is
+therefore cleared and re-copied on every start. Only directories the add-on
+installed are cleared: a skill you wrote yourself under `~/.claude/skills/` is
+left alone, including one sharing a name with a bundled skill, which wins and is
+kept with a warning in the log.
+
+### 🧪 The skills can't drift away from the tools
+
+A skill describing a command that no longer exists is worse than no skill —
+it sends Claude confidently at something that is not there. Three checks keep
+them in step:
+
+- `tests/test_scripts.sh` fails when any skill names an `ha-`/`claude-` command
+  that `setup_commands` does not install, when frontmatter is malformed or a
+  skill's `name` disagrees with its directory, and when the Dockerfile or
+  `run.sh` stops shipping the skills at all.
+- `ci/smoke.sh` asserts every expected skill is present in the built image with
+  valid frontmatter — a skill missing from the image fails silently otherwise,
+  because Claude simply never learns the command exists.
+- The generated `~/.claude/CLAUDE.md` (`ha-context`) now lists the installed
+  skills, so they are discoverable from always-loaded context.
+
 ## 2.5.1-wdn.13
 
 ### 🐛 Bug scrub of the wdn.10 / wdn.11 tooling
