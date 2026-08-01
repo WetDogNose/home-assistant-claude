@@ -14,7 +14,24 @@ FROM ${BUILD_FROM}
 # coding terminal attached to a Home Assistant configuration directory: yq
 # edits YAML, and a JS project that cannot run npm would be a confusing
 # regression to save ~50MB.
-RUN apk add --no-cache \
+# `apk upgrade` before `apk add`, in the same layer, is what keeps the shipped
+# image current with the Alpine 3.23 security branch. The HA base image is
+# rebuilt on its own cadence, so by the time a release is cut its packages are
+# typically weeks behind secdb -- that lag was the entire source of the 65
+# outstanding OS-package findings (bind, curl/libcurl, openssl, c-ares), every
+# one of which already had a fixed version published in 3.23.
+#
+# It has to run in THIS layer rather than its own: a separate upgrade layer is
+# cached independently, so a rebuild would replay a stale upgrade and re-ship
+# the packages it was added to replace.
+#
+# hadolint's DL3017 objects to `apk upgrade` on the grounds that it makes builds
+# non-reproducible. That trade was already made here -- every `apk add` below is
+# unpinned by design (DL3018 is ignored in CI), and the daily canary is what
+# catches a float that breaks the build.
+# hadolint ignore=DL3017
+RUN apk upgrade --no-cache \
+    && apk add --no-cache \
     bash \
     curl \
     git \
@@ -31,6 +48,23 @@ RUN apk add --no-cache \
     vim \
     wget \
     yq-go
+
+# /usr/bin/tempio ships in the HA base image as a convenience for add-ons that
+# render config files from their options at boot. This add-on renders nothing:
+# every option is read with `bashio::config` in run.sh, and `init: false` means
+# there is no s6 stage that could invoke it either. Nothing in this tree names
+# it.
+#
+# It is not idle weight, it is the single largest source of vulnerability
+# findings in the image: a Go binary frozen at whatever toolchain built the base
+# (Go 1.23.3 stdlib, golang.org/x/crypto v0.26.0), carrying 67 CVEs including
+# the image's only CRITICAL. Nothing in this repository can patch it -- the fix
+# would have to come from a base image rebuild -- and unlike the apk packages
+# above there is no `upgrade` that reaches it.
+#
+# Deleting an unused binary is the whole fix. Removed in the same layer that
+# ships it into the final filesystem so no layer retains a copy.
+RUN rm -f /usr/bin/tempio
 
 # uv from PyPI: Alpine's apk uv historically could not install managed musl
 # CPython builds, which ha-mcp needs (it requires Python 3.13 exactly, and no

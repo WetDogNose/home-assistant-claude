@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.5.1-wdn.9
+
+### 🔒 Cleared all 132 open code scanning alerts
+The Security tab had accumulated 132 Trivy findings (1 CRITICAL, 47 HIGH, 60 MEDIUM, 23 LOW, 1 unrated) from two independent sources. Both are fixed at the image level, so the count goes to zero rather than being suppressed.
+
+- **Removed `/usr/bin/tempio` — 67 findings, including the only CRITICAL.** `tempio` is a Go helper the Home Assistant base image ships for add-ons that render config files from their options at boot. This add-on renders nothing (every option is read through `bashio::config`, and `init: false` means there is no s6 stage either), so the binary was pure dead weight — but frozen at the base image's toolchain (Go 1.23.3 stdlib, `golang.org/x/crypto` v0.26.0) it carried 67 CVEs that no change in this repository could patch.
+- **`apk upgrade` at build time — 65 findings.** Every outstanding OS-package CVE (`bind-libs`/`bind-tools`, `curl`/`libcurl`, `libcrypto3`/`libssl3`, `c-ares`) already had a fixed version published in the Alpine 3.23 branch; the image was simply shipping whatever the base image was built with. Builds now upgrade before installing, so a rebuild picks security fixes up on its own.
+
+### 🚦 The security scan now gates instead of only reporting
+`security-scan.yml` reported findings but never failed, which is how 132 alerts built up across an entirely green history. It now fails on a HIGH/CRITICAL that Alpine has already published a fix for — actionable by definition, since a rebuild resolves it. Vulnerabilities with no upstream fix stay visible in the job summary and Security tab without blocking unrelated pull requests. The gate runs last, so a failing scan still leaves a refreshed Security tab and a readable summary behind it.
+
+No user-facing behaviour, options or credentials are affected.
+
 ## 2.5.1-wdn.8
 
 ### 📚 Terminology & App Store Updates
