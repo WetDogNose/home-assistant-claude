@@ -1,6 +1,6 @@
 # Claude Terminal for Home Assistant (WetDogNose fork)
 
-Claude Code in a web terminal, as a Home Assistant add-on.
+Claude Code in a web terminal, as a Home Assistant app.
 
 A fork of [heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons) — see [Upstream & attribution](#upstream--attribution).
 
@@ -10,7 +10,7 @@ A fork of [heytcass/home-assistant-addons](https://github.com/heytcass/home-assi
 
 ## What is Claude Terminal?
 
-This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI in a browser-based terminal, directly from your Home Assistant dashboard. It starts in your `/config` directory, so Claude can immediately help with:
+This app runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI in a browser-based terminal, directly from your Home Assistant dashboard. It starts in your `/config` directory, so Claude can immediately help with:
 
 - Writing and debugging automations, scripts, and dashboards
 - Fixing YAML configuration problems
@@ -26,14 +26,14 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 - **Persistent auth**: log in once via OAuth; credentials survive restarts and updates
 - **Home Assistant MCP**: bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language control of your instance
 - **GitHub built in**: the `gh` CLI is included — run `github-setup` once and Claude can manage issues, PRs and releases, and push commits
-- **HA Smart Context**: Claude automatically knows your HA version, entities, and add-ons
+- **HA Smart Context**: Claude automatically knows your HA version, entities, and apps
 - **Broad file access**: `/config`, `/addon_configs`, and `/share` are mounted
 - **Persistent packages**: `persist-install` keeps your extra apk/pip tools across restarts
 - **Multi-architecture**: amd64 and aarch64 (prebuilt images pulled from GHCR)
 
 ## Installation
 
-1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
+1. In Home Assistant, go to **Settings** → **Apps** → **App Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
 3. Add this URL and click **Add**:
 
@@ -42,7 +42,7 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
    ```
 
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
-5. Start the add-on, then click **OPEN WEB UI** or the sidebar icon
+5. Start the app, then click **OPEN WEB UI** or the sidebar icon
 6. On first use, follow the OAuth prompts to log in to your Anthropic account
 
 Images are pulled prebuilt from `ghcr.io/wetdognose`, so nothing is built on your Home Assistant machine.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.1-wdn.8
+
+### 📚 Terminology & App Store Updates
+- Updated documentation and UI references across the project to match modern Home Assistant terminology ("Home Assistant apps", "App Store", "Settings → Apps → App Store").
+
 ## 2.5.1-wdn.7
 
 ### ✨ Automated OAuth Login Notifications & Terminal Mouse Fixes

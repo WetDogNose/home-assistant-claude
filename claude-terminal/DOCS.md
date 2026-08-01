@@ -1,14 +1,14 @@
 # Claude Terminal
 
-Claude Code in a web terminal, as a Home Assistant add-on.
+Claude Code in a web terminal, as a Home Assistant app.
 
 ## About
 
-This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI in a browser-based terminal (ttyd + tmux) with your Home Assistant configuration mounted. Open it from the sidebar, log in once, and ask Claude to write automations, debug YAML, or manage your setup.
+This app runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI in a browser-based terminal (ttyd + tmux) with your Home Assistant configuration mounted. Open it from the sidebar, log in once, and ask Claude to write automations, debug YAML, or manage your setup.
 
 ## Installation
 
-1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
+1. In Home Assistant, go to **Settings** → **Apps** → **App Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
 3. Add this URL and click **Add**:
 
@@ -17,12 +17,12 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
    ```
 
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
-5. Start the add-on, then click **OPEN WEB UI** to access the terminal
+5. Start the app, then click **OPEN WEB UI** to access the terminal
 6. On first use, follow the OAuth prompts to log in to your Anthropic account
 
 Images are pulled prebuilt from `ghcr.io/wetdognose`, so installing does not build anything on your Home Assistant machine.
 
-Your credentials are stored under `/data` and persist across restarts and add-on updates, so you won't need to log in again.
+Your credentials are stored under `/data` and persist across restarts and app updates, so you won't need to log in again.
 
 > **This is a fork.** It uses the slug `claude_terminal_wdn`, distinct from
 > upstream's `claude_terminal`, so it installs alongside the original instead

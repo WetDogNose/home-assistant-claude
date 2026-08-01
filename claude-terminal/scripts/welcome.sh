@@ -12,7 +12,7 @@ NC='\033[0m'
 version=$(cat /opt/scripts/addon-version 2>/dev/null || echo "unknown")
 
 echo ""
-echo -e "  ${TERRACOTTA}Claude Terminal${NC}  ${DIM}v${version} · Home Assistant add-on${NC}"
+echo -e "  ${TERRACOTTA}Claude Terminal${NC}  ${DIM}v${version} · Home Assistant app${NC}"
 echo ""
 echo -e "  ${WHITE}claude${NC}            start Claude Code  ${DIM}(-c continue · -r resume a session)${NC}"
 echo -e "  ${WHITE}claude-doctor${NC}     diagnose network, auth, and environment issues"
