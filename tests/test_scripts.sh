@@ -158,21 +158,48 @@ assert_exit_code 0 "$SCRIPT_DIR/ha-git-backups.sh" --help
 
 echo "13. Testing shipped blueprints parse as YAML"
 BLUEPRINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../claude-terminal/blueprints" && pwd)"
-for bp in "$BLUEPRINT_DIR"/*.yaml; do
-    # Home Assistant blueprints use the custom !input tag, which safe_load
-    # rejects; register it so the check tests YAML validity, not tag support.
-    if python3 -c "
+
+# 0 = valid, 1 = invalid, 2 = no YAML parser available.
+#
+# Distinguishing 2 matters: reporting a missing PyYAML as "not valid YAML"
+# sends you looking for a syntax error that isn't there.
+yaml_parses() {
+    local f="$1"
+    if python3 -c "import yaml" 2>/dev/null; then
+        # Home Assistant blueprints use the custom !input tag, which safe_load
+        # rejects; register it so this tests YAML validity, not tag support.
+        python3 -c "
 import sys, yaml
 class L(yaml.SafeLoader): pass
 L.add_constructor('!input', lambda loader, node: loader.construct_scalar(node))
 yaml.load(open(sys.argv[1]), Loader=L)
-" "$bp" 2>/dev/null; then
-        echo "  [PASS] $(basename "$bp") is valid YAML"
-        PASSED=$((PASSED + 1))
-    else
-        echo "  [FAIL] $(basename "$bp") is not valid YAML"
-        FAILED=$((FAILED + 1))
+" "$f" 2>/dev/null || return 1
+        return 0
     fi
+    if command -v ruby >/dev/null 2>&1; then
+        ruby -ryaml -e "YAML.load_file(ARGV[0])" "$f" >/dev/null 2>&1 || return 1
+        return 0
+    fi
+    return 2
+}
+
+for bp in "$BLUEPRINT_DIR"/*.yaml; do
+    rc=0
+    yaml_parses "$bp" || rc=$?
+    case "$rc" in
+        0)
+            echo "  [PASS] $(basename "$bp") is valid YAML"
+            PASSED=$((PASSED + 1))
+            ;;
+        1)
+            echo "  [FAIL] $(basename "$bp") is not valid YAML"
+            FAILED=$((FAILED + 1))
+            ;;
+        *)
+            echo "  [FAIL] $(basename "$bp") could not be checked: no YAML parser found (pip install pyyaml)"
+            FAILED=$((FAILED + 1))
+            ;;
+    esac
 done
 
 echo "14. Testing Automation API callers agree with the server routes"

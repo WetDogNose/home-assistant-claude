@@ -28,6 +28,12 @@ jobs:
       - name: Install ShellCheck & Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck jq yq
+          # setup-python installs a clean interpreter with no PyYAML, while both
+          # ci/check-docs-drift.sh and the blueprint checks in
+          # tests/test_scripts.sh parse YAML from Python. Without this they fall
+          # through to whatever `ruby` the runner image happens to ship, which
+          # is not a dependency this repository declares anywhere.
+          python3 -m pip install --upgrade pyyaml
 
       - name: Run Local Validation Suite
         run: |
