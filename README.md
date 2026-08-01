@@ -40,51 +40,19 @@ without leaving the Home Assistant sidebar.
 
 ## Install
 
-> [!IMPORTANT]
-> This repository is **private**, and the Supervisor clones add-on repositories
-> anonymously. It therefore needs a GitHub token embedded in the repository URL.
-
-<details>
-<summary><b>Step 1 — create a read-only access token</b></summary>
-
-<br>
-
-On GitHub: **Settings** → **Developer settings** → **Personal access tokens** →
-**Fine-grained tokens** → **Generate new token**
-
-| Setting | Value |
-|---|---|
-| Repository access | *Only select repositories* → `home-assistant-claude` |
-| Permissions | *Repository permissions* → **Contents: Read-only** |
-| Expiry | Whatever you are willing to renew |
-
-Read-only access to Contents is all a clone needs. Prefer a fine-grained token
-over a classic one — a classic token's `repo` scope grants read **and write** to
-*every* private repository you own, where this grants read to exactly one.
-
-</details>
-
-**Step 2 — add the repository**
-
-1. Go to **Settings** → **Add-ons** → **Add-on Store**
-2. Click **⋮** (top right) → **Repositories**
-3. Add this URL, with your token substituted:
+1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
+2. Click the **⋮** menu in the top right and choose **Repositories**
+3. Add this repository URL and click **Add**:
 
    ```text
-   https://WetDogNose:YOUR_TOKEN@github.com/WetDogNose/home-assistant-claude.git
+   https://github.com/WetDogNose/home-assistant-claude
    ```
 
-4. Install **Claude Terminal (WetDogNose)**, then start it
-5. Click **OPEN WEB UI**, and follow the OAuth prompts on first launch
+4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
+5. Start the add-on, then click **OPEN WEB UI** or open it from the sidebar
+6. On first launch, follow the OAuth prompts to sign in to your Anthropic account
 
-Images are pulled prebuilt from `ghcr.io/wetdognose`, so nothing is compiled on
-your Home Assistant machine.
-
-> [!WARNING]
-> The Supervisor stores that URL **verbatim** — the token appears in the
-> repository list and in every Home Assistant backup, which is exactly why it
-> should be read-only and scoped to this one repository. Expiry is silent: the
-> store simply stops seeing new versions, so update the URL with a fresh token.
+Images are pulled prebuilt from `ghcr.io/wetdognose`, so nothing is compiled on your Home Assistant machine.
 
 > [!NOTE]
 > **Installs alongside the original.** This fork's slug is `claude_terminal_wdn`,
