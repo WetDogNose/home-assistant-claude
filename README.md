@@ -7,7 +7,7 @@
 Write automations, debug YAML and control your instance in plain language —
 without leaving the Home Assistant sidebar.
 
-![Version](https://img.shields.io/badge/version-2.5.1--wdn.5-d97757?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.1--wdn.8-d97757?style=for-the-badge)
 ![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-2b5b84?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
@@ -28,7 +28,7 @@ without leaving the Home Assistant sidebar.
 |:--:|---|
 | 🖥️ | **Just Claude Code** — opens straight into Claude, no menus in the way |
 | 🤖 | **Automation API** — call Claude non-interactively from Home Assistant automations via secure HTTP endpoint |
-| 🏠 | **Knows your setup** — version, entities and add-ons are summarised for Claude automatically |
+| 🏠 | **Knows your setup** — version, entities and apps are summarised for Claude automatically |
 | 🔌 | **Controls Home Assistant** — bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language device and automation control |
 | 🔁 | **Survives reloads** — tmux keeps your conversation alive across browser refreshes and navigation |
 | 🔑 | **Log in once** — OAuth credentials persist across restarts and updates |
@@ -40,7 +40,7 @@ without leaving the Home Assistant sidebar.
 
 ## Install
 
-1. In Home Assistant, go to **Settings** → **Add-ons** → **Add-on Store**
+1. In Home Assistant, go to **Settings** → **Apps** → **App Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
 3. Add this repository URL and click **Add**:
 
@@ -49,7 +49,7 @@ without leaving the Home Assistant sidebar.
    ```
 
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
-5. Start the add-on, then click **OPEN WEB UI** or open it from the sidebar
+5. Start the app, then click **OPEN WEB UI** or open it from the sidebar
 6. On first launch, follow the OAuth prompts to sign in to your Anthropic account
 
 Images are pulled prebuilt from `ghcr.io/wetdognose`, so nothing is compiled on your Home Assistant machine.
@@ -85,7 +85,7 @@ full reference lives in **[DOCS.md](claude-terminal/DOCS.md)**.
 ## Security
 
 > [!CAUTION]
-> **This add-on is powerful by design.** It runs as root, has read-write access
+> **This app is powerful by design.** It runs as root, has read-write access
 > to `/config`, `/addon_configs` and `/share`, and with MCP enabled can control
 > devices and rewrite automations.
 
