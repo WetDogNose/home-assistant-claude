@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.1-wdn.5
+
+### ✨ Home Assistant Automation API
+- Added HTTP Automation API daemon (`claude-api-server`) running on internal port `8128`.
+- Enables Home Assistant automations, scripts, and blueprints to trigger Claude non-interactively (`claude -p "..."`).
+- **Security controls**: Token authentication (`X-API-Key` or `Authorization: Bearer`), auto-generated 32-character API key (`/data/automation_api_token`), internal bridge network isolation (no host port published), IP subnet whitelisting, rate limiting (10 req/min), single process mutex lock, and safe parameterized subprocess execution.
+- Added options `enable_automation_api`, `automation_api_port`, and `automation_api_key`.
+
 ## 2.5.1-wdn.4
 
 ### 🎨 Visual & Branding Updates

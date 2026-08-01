@@ -77,6 +77,23 @@ configuration:
       connection above. Leave this as it is unless you have a reason to change
       it.
 
+  enable_automation_api:
+    name: Enable Home Assistant Automation API
+    description: >-
+      Runs an HTTP daemon (port 8128) allowing Home Assistant automations,
+      scripts, and REST commands to trigger Claude non-interactively.
+
+  automation_api_port:
+    name: Automation API Port
+    description: >-
+      Internal container port for the Automation API server (default 8128).
+
+  automation_api_key:
+    name: Automation API Key (optional)
+    description: >-
+      Custom API key for automation requests. If left empty, a 32-character
+      random key is auto-generated in /data/automation_api_token.
+
   git_user_name:
     name: Git author name
     description: >-

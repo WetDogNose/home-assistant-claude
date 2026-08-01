@@ -114,6 +114,7 @@ setup_commands() {
         "github-setup:/opt/scripts/github-setup.sh" \
         "claude-launch:/opt/scripts/claude-launch.sh" \
         "data-gc:/opt/scripts/data-gc.sh" \
+        "claude-api-server:/opt/scripts/claude-api-server.py" \
         "ha-notify:/opt/scripts/ha-notify.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
@@ -565,6 +566,40 @@ setup_ha_mcp() {
     fi
 }
 
+# Start Automation API server for Home Assistant automations
+start_automation_api() {
+    local enabled port custom_key token_file="/data/automation_api_token"
+    enabled=$(bashio::config 'enable_automation_api' 'true' 2>/dev/null) || enabled="true"
+    [ -z "$enabled" ] || [ "$enabled" = "null" ] && enabled="true"
+
+    if [ "$enabled" = "false" ]; then
+        bashio::log.info "Automation API server is disabled in options."
+        return 0
+    fi
+
+    port=$(bashio::config 'automation_api_port' '8128' 2>/dev/null) || port="8128"
+    custom_key=$(bashio::config 'automation_api_key' '' 2>/dev/null) || custom_key=""
+
+    if [ -n "$custom_key" ] && [ "$custom_key" != "null" ]; then
+        echo "$custom_key" > "$token_file"
+        chmod 600 "$token_file"
+        bashio::log.info "Automation API token set from options"
+    elif [ ! -s "$token_file" ]; then
+        local gen_token
+        gen_token=$(hexdump -vn 16 -e '4/4 "%08x"' /dev/urandom 2>/dev/null || date +%s%N | md5sum | head -c 32)
+        echo "$gen_token" > "$token_file"
+        chmod 600 "$token_file"
+        bashio::log.info "Generated new Automation API token in /data/automation_api_token"
+    fi
+
+    if [ -f "/usr/local/bin/claude-api-server" ]; then
+        bashio::log.info "Starting Automation API server on port ${port}..."
+        python3 /usr/local/bin/claude-api-server --port "${port}" --token-file "$token_file" &
+    else
+        bashio::log.warning "claude-api-server not found, skipping Automation API startup."
+    fi
+}
+
 # Main execution
 main() {
     bashio::log.info "Starting Claude Terminal add-on..."
@@ -573,6 +608,7 @@ main() {
     setup_commands
     update_claude
     configure_git
+    start_automation_api
 
     # Everything below this line used to run in the FOREGROUND before
     # exec ttyd: apk/pip installs with no timeout, and two cold starts of a
