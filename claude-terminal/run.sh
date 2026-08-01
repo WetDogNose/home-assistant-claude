@@ -631,6 +631,14 @@ start_automation_api() {
     fi
 }
 
+# Start Claude login URL notification daemon
+start_login_notifier() {
+    if [ -f "/usr/local/bin/claude-login-notifier" ]; then
+        bashio::log.info "Starting Claude login URL notification daemon..."
+        /usr/local/bin/claude-login-notifier &
+    fi
+}
+
 # Start Claude Cron background daemon
 start_claude_cron() {
     if [ -f "/usr/local/bin/claude-cron" ]; then
