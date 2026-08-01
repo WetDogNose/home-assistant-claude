@@ -32,7 +32,7 @@ init_config() {
 cmd_status() {
     init_config
     echo "=== Claude Remote Messaging Bot Status ==="
-    cat "$BOT_CONFIG" | jq .
+    jq . "$BOT_CONFIG"
 }
 
 cmd_forward() {

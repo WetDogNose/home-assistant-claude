@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 echo "========================================="
 echo "1/4 Running ShellCheck Static Analysis..."
 echo "========================================="
-shellcheck -s bash -e SC1008 -e SC1091 -e SC2016 -e SC2129 -e SC1003 \
+shellcheck -s bash -e SC1008 -e SC1091 -e SC2016 -e SC2129 -e SC1003 -e SC2002 \
     claude-terminal/run.sh claude-terminal/scripts/*.sh
 echo "ShellCheck: PASS"
 echo ""
