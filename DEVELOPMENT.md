@@ -107,6 +107,26 @@ podman run -d --name test-claude-dev-8681 -p 8681:7681 -v /tmp/test-config-2:/co
 podman run -d --name test-claude-dev-9681 -p 9681:7681 -v /tmp/test-config-3:/config local/claude-terminal:test
 ```
 
+#### Automation API Testing
+
+```bash
+# 1. Start container mapping the API port 8128
+podman run -d --name test-claude-dev -p 7681:7681 -p 8128:8128 \
+  -v /tmp/test-config:/config -v /tmp/test-data:/data local/claude-terminal:test
+
+# 2. Check API health status
+curl -s http://localhost:8128/health
+
+# 3. Read auto-generated token from test data directory
+TOKEN=$(cat /tmp/test-data/automation_api_token)
+
+# 4. Test non-interactive prompt execution
+curl -s -X POST http://localhost:8128/api/prompt \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${TOKEN}" \
+  -d '{"prompt": "echo Automation API working!"}'
+```
+
 ### Debugging Techniques
 
 #### Container Inspection
@@ -238,21 +258,21 @@ podman volume prune
 
 ## Production Deployment
 
-Once testing is complete:
+A deployable release requires:
+1. Bumping `version:` in `claude-terminal/config.yaml`.
+2. Adding a matching `## <version>` section in `claude-terminal/CHANGELOG.md`.
+3. Pushing a tag `v<version>` (`release.yml` and `publish-images.yml` are tag-driven).
 
 ```bash
-# Commit changes
+# 1. Commit changes
 git add .
-git commit -m "feature: description of changes"
-
-# Update version in config.yaml
-vim claude-terminal/config.yaml
-
-# Push to main branch
+git commit -m "feat(claude-terminal): description of changes"
 git push origin main
-```
 
-The changes will automatically be built and distributed to Home Assistant users.
+# 2. Tag and push release (triggers GHCR image build & GitHub release)
+git tag v2.5.1-wdn.5
+git push origin v2.5.1-wdn.5
+```
 
 ## Advanced Testing
 
@@ -270,10 +290,10 @@ podman run -d --name test-ha-claude -p 7681:7681 \
 ### Cross-Platform Testing
 
 ```bash
-# Test different base images
+# Test architecture base images (amd64 and aarch64 supported)
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+  -t local/claude-terminal:amd64 ./claude-terminal
+
 podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.21 \
   -t local/claude-terminal:arm64 ./claude-terminal
-
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/armv7-base:3.21 \
-  -t local/claude-terminal:armv7 ./claude-terminal
 ```

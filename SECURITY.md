@@ -30,25 +30,24 @@ vulnerability. **By design**, this add-on:
 
 - runs as **root** inside its container;
 - has **read-write** access to `/config`, `/addon_configs` and `/share`;
-- holds a Supervisor token with `hassio_role: manager`, so it can query and
-  control Home Assistant;
+- holds a Supervisor token with `hassio_role: default` to query and control Home Assistant;
 - with `enable_ha_mcp` on, can actuate devices and rewrite automations;
+- runs an HTTP Automation API daemon (port 8128) for non-interactive automation triggers;
 - executes an LLM agent that runs arbitrary shell commands.
 
 None of the above is a vulnerability on its own — it is what a coding agent
-with Home Assistant access requires in order to be useful. Home Assistant
-scores the add-on **6 out of 8** on its own rating scale: baseline 5, +2 for
-ingress, −1 for `hassio_role: manager`.
+with Home Assistant access requires in order to be useful.
 
-### Known, accepted risks
+### Known, accepted risks & mitigations
 
-| Risk | Status |
+| Feature / Risk | Security Controls & Status |
 |---|---|
 | `dangerously_skip_permissions` removes the confirmation step before Claude changes files or actuates devices | Off by default; a warning is printed in the add-on log whenever it is on |
+| Automation API (Port 8128) | Mandatory API Token (`X-API-Key`), IP subnet filtering (Docker container bridge only), rate-limiting (10 req/min), single process mutex, safe parameterized array execution (`shell=False`), and no host port published |
 | Prompt injection via any file, issue or web page Claude reads | Inherent to agents; the confirmation step is the mitigation, which is why the option above defaults off |
-| `panel_admin` controls sidebar visibility only, **not** access — any authenticated Home Assistant user can reach the terminal through ingress | Known limitation of ingress; do not grant Home Assistant accounts to people you would not give a root shell |
-| Publishing port `7681` exposes an unauthenticated terminal on the LAN, because ttyd runs without a credential and relies on ingress for authentication | Left unpublished by default; do not set a host port |
-| Credentials (Claude OAuth, GitHub token) are stored in plaintext under `/data`, which is included in Home Assistant backups | Alpine has no keyring; treat backups as secrets |
+| `panel_admin` controls sidebar visibility only, **not** access — any authenticated Home Assistant user can reach the terminal through ingress | Known limitation of ingress; set `require_ingress_user: true` if your proxy forwards remote identity headers |
+| Publishing host ports exposes terminal or API on the LAN | Ports are left unpublished by default; access stays within ingress and container network |
+| Credentials (Claude OAuth, GitHub token, Automation API key) | Stored under `/data` with 600 permissions; treat backups as secrets |
 
 ### What we do want to hear about
 

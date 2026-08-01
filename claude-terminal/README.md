@@ -20,6 +20,7 @@ This add-on runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/cl
 ## Features
 
 - **Just Claude Code**: opens straight into Claude — no menus in the way
+- **Automation API**: HTTP daemon (port 8128) allowing Home Assistant automations to trigger non-interactive Claude prompts safely
 - **Stays current**: the official native Claude Code build is installed into persistent storage and auto-updated in the background
 - **Session persistence**: tmux keeps your conversation alive across browser reloads and HA navigation; scrollback and mouse copy work
 - **Persistent auth**: log in once via OAuth; credentials survive restarts and updates
@@ -77,6 +78,9 @@ Works out of the box. All options:
 | `ha_smart_context` | `true` | Generate HA context file for Claude |
 | `enable_ha_mcp` | `true` | Home Assistant MCP server integration |
 | `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run |
+| `enable_automation_api` | `true` | Enable HTTP Automation API daemon (port 8128) |
+| `automation_api_port` | `8128` | Container port for Automation API server |
+| `automation_api_key` | `""` | Custom API key (auto-generated in `/data/automation_api_token` if empty) |
 | `git_user_name` | `""` | Author name for git commits made from the terminal |
 | `git_user_email` | `""` | Author email for git commits made from the terminal |
 | `persistent_apk_packages` | `[]` | APK packages to install on startup |
