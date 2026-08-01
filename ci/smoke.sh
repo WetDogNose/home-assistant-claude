@@ -27,7 +27,10 @@ for s in /run.sh /opt/scripts/setup-ha-mcp.sh /opt/scripts/health-check.sh \
          /opt/scripts/ha-snapshot.sh /opt/scripts/ha-validate.sh \
          /opt/scripts/ha-scaffold.sh /opt/scripts/esphome-setup.sh \
          /opt/scripts/ha-tts.sh /opt/scripts/claude-cron.sh \
-         /opt/scripts/ha-diagnose.sh; do
+         /opt/scripts/ha-diagnose.sh /opt/scripts/ha-dashboard.sh \
+         /opt/scripts/ha-mesh.sh /opt/scripts/ha-assist.sh \
+         /opt/scripts/ha-memory.sh /opt/scripts/claude-bot.sh \
+         /opt/scripts/ha-git-backups.sh; do
   if [ -x "$s" ]; then echo "OK: $s"; else echo "FAIL: $s not executable"; rc=1; fi
 done
 exit $rc

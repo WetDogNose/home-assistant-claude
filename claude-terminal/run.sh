@@ -140,7 +140,13 @@ setup_commands() {
         "esphome-setup:/opt/scripts/esphome-setup.sh" \
         "ha-tts:/opt/scripts/ha-tts.sh" \
         "claude-cron:/opt/scripts/claude-cron.sh" \
-        "ha-diagnose:/opt/scripts/ha-diagnose.sh"; do
+        "ha-diagnose:/opt/scripts/ha-diagnose.sh" \
+        "ha-dashboard:/opt/scripts/ha-dashboard.sh" \
+        "ha-mesh:/opt/scripts/ha-mesh.sh" \
+        "ha-assist:/opt/scripts/ha-assist.sh" \
+        "ha-memory:/opt/scripts/ha-memory.sh" \
+        "claude-bot:/opt/scripts/claude-bot.sh" \
+        "ha-git-backups:/opt/scripts/ha-git-backups.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then

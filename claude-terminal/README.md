@@ -21,9 +21,16 @@ This app runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claud
 
 - **Just Claude Code**: opens straight into Claude — no menus in the way
 - **Automation API & Blueprint**: HTTP daemon (port 8128) and HA Blueprint for non-interactive Claude prompts
+- **Dashboard Generator**: `ha-dashboard` generates Lovelace YAML dashboards by area or entity domain
+- **Mesh & Battery Inspector**: `ha-mesh` scans Zigbee/Z-Wave/Matter signal quality and low battery levels
+- **PyScript & Integration Scaffolding**: `ha-scaffold` generates custom integrations or PyScript Python automations
+- **HA Assist Integration**: `ha-assist` queries Home Assistant Assist voice pipeline
+- **State History Search**: `ha-memory` queries state transitions and event history
+- **Remote Messaging Bot**: `claude-bot` connects Telegram/Matrix/Discord webhooks to Claude
+- **Git Time-Machine**: `ha-git-backups` commits `/config` with 1-click `rollback` functionality
 - **YAML Guardrails & Validation**: `ha-validate` utility checks configuration via HA API and auto-restores `.bak` on error
 - **Camera Vision**: `ha-snapshot` captures camera frames for Claude visual analysis
-- **Dev & ESPHome Tools**: `ha-scaffold` generates custom integration boilerplate; `esphome-setup` installs ESPHome CLI
+- **Dev & ESPHome Tools**: `esphome-setup` installs & persists ESPHome CLI
 - **Autonomous Scheduler**: `claude-cron` executes scheduled background prompts and posts HA notifications
 - **Quick-Bar & Diagnostics**: `ha-diagnose` for one-command system health; `Ctrl+B h` popup menu in tmux
 - **Stays current**: the official native Claude Code build is installed into persistent storage and auto-updated in the background

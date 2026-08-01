@@ -1,26 +1,56 @@
 #!/bin/bash
 
-# ha-scaffold — Scaffold a new Home Assistant custom component
-# Usage: ha-scaffold <domain> [name] [description]
+# ha-scaffold — Scaffold a new Home Assistant custom component or PyScript automation
+# Usage: ha-scaffold <domain> [name] [description] OR ha-scaffold pyscript <name> [description]
 
 set -euo pipefail
 
 show_help() {
     cat << 'EOF'
-ha-scaffold — Scaffold a new Home Assistant custom component
+ha-scaffold — Scaffold Home Assistant custom component or PyScript automation
 
 Usage:
   ha-scaffold <domain> [friendly_name] [description]
+  ha-scaffold pyscript <script_name> [description]
 
-Example:
+Examples:
   ha-scaffold solar_monitor "Solar Monitor" "Monitors solar inverter stats"
-
-Creates directory and files in /config/custom_components/<domain>/
+  ha-scaffold pyscript smart_hvac "Automated HVAC control script"
 EOF
 }
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ $# -eq 0 ]; then
     show_help
+    exit 0
+fi
+
+if [ "$1" = "pyscript" ]; then
+    SCRIPT_NAME="${2:-my_automation}"
+    SCRIPT_NAME=$(echo "$SCRIPT_NAME" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+    DESCRIPTION="${3:-PyScript automation script for $SCRIPT_NAME}"
+    TARGET_DIR="/config/pyscript"
+    TARGET_FILE="${TARGET_DIR}/${SCRIPT_NAME}.py"
+
+    mkdir -p "$TARGET_DIR"
+    
+    if [ -f "$TARGET_FILE" ]; then
+        echo "Error: File ${TARGET_FILE} already exists!" >&2
+        exit 1
+    fi
+
+    cat << EOF > "$TARGET_FILE"
+"""
+${DESCRIPTION}
+"""
+
+@state_trigger("binary_sensor.front_door_motion == 'on'")
+def ${SCRIPT_NAME}_handler():
+    """Handler function executed on state change."""
+    log.info(f"PyScript ${SCRIPT_NAME} triggered")
+    # Example action: call a service
+    # service.call("light", "turn_on", entity_id="light.hallway", brightness=255)
+EOF
+    echo "PyScript automation created at: ${TARGET_FILE}"
     exit 0
 fi
 
