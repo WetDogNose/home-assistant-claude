@@ -66,6 +66,7 @@ Your credentials are stored under `/data` and persist across restarts and add-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `auto_launch_claude` | `true` | Start Claude immediately when the terminal opens. Set to `false` to get a shell instead (run `claude` yourself). |
+| `tmux_mouse` | `false` | Enable tmux mouse mode. Off by default (`false`) so native browser text selection, `Ctrl+C` / `Cmd+C` copying, and single-click URL opening work seamlessly. Set to `true` to enable tmux mouse pane selection. |
 | `require_ingress_user` | `false` | Restrict the terminal to signed-in Home Assistant users. Off by default because not every installation forwards the identity — see Security notes before enabling. |
 | `claude_auto_update` | `true` | Keep Claude Code current: installs the official native build into `/data` and updates it in the background on each startup. |
 | `claude_version` | `""` | Pin Claude Code to `stable`, `latest`, or an exact `X.Y.Z`. Empty tracks the newest release. Use this if an upstream release will not run in this add-on — see below. |
@@ -103,10 +104,10 @@ ha-context      # refresh the Home Assistant context file
 
 ### Terminal tips
 
-- **Scrolling**: use the mouse wheel — tmux copy-mode opens automatically. Press `q` to jump back to the bottom.
-- **Copying**: select text with the mouse; on release it's copied to your clipboard (OSC 52). Long wrapped lines (like OAuth URLs) are joined back into one line automatically. Note: browsers only allow clipboard writes on secure pages — if you access Home Assistant over plain `http://`, use Shift+drag instead.
-- **Shift+drag**: bypasses tmux and gives you the browser's native text selection (copy with `Ctrl+C` / right-click). Works everywhere, but wrapped lines are copied with line breaks — rejoin them by hand.
-- **Pasting**: use `Ctrl+Shift+V` (or right-click, depending on browser).
+- **Automatic Login Notifications**: When Claude Code displays an OAuth authorization link, a Home Assistant persistent notification is automatically sent to the notification drawer with a direct clickable link (`[👉 Authorize Claude Code]`).
+- **Copying & URL Clicking**: With default settings (`tmux_mouse: false`), native browser selection works directly — select text with your mouse and copy with `Ctrl+C` / `Cmd+C` or right-click. Terminal URLs (`https://...`) can be clicked directly to open in a new tab.
+- **Tmux Mouse Mode**: If `tmux_mouse: true` is enabled, `Shift+drag` bypasses tmux mouse mode to perform native browser selection, and `Shift+Click` opens URLs.
+- **Pasting**: Use `Ctrl+Shift+V` (or `Cmd+V` / right-click, depending on browser).
 
 ### File access
 

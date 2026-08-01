@@ -52,13 +52,30 @@ init_environment() {
     # Migrate any existing authentication files from legacy locations
     migrate_legacy_auth_files "$claude_config_dir"
 
-    # Install tmux configuration to user home directory
+    # Install and configure tmux configuration in user home directory
+    configure_tmux "$data_home"
+
+    bashio::log.info "Environment initialized (HOME=${HOME})"
+}
+
+# Configure tmux configuration options based on add-on settings
+configure_tmux() {
+    local data_home="$1"
     if [ -f "/opt/scripts/tmux.conf" ]; then
         cp /opt/scripts/tmux.conf "$data_home/.tmux.conf"
         chmod 644 "$data_home/.tmux.conf"
     fi
 
-    bashio::log.info "Environment initialized (HOME=${HOME})"
+    local mouse_enabled
+    mouse_enabled=$(bashio::config 'tmux_mouse' 'false' 2>/dev/null) || mouse_enabled="false"
+    [ -z "$mouse_enabled" ] || [ "$mouse_enabled" = "null" ] && mouse_enabled="false"
+
+    if [ "$mouse_enabled" != "true" ]; then
+        sed -i 's/set -g mouse on/set -g mouse off/' "$data_home/.tmux.conf" 2>/dev/null || true
+        bashio::log.info "tmux mouse mode disabled (native browser text selection & URL clicks enabled)"
+    else
+        bashio::log.info "tmux mouse mode enabled"
+    fi
 }
 
 # One-time migration of existing authentication files
@@ -115,6 +132,7 @@ setup_commands() {
         "claude-launch:/opt/scripts/claude-launch.sh" \
         "data-gc:/opt/scripts/data-gc.sh" \
         "claude-api-server:/opt/scripts/claude-api-server.py" \
+        "claude-login-notifier:/opt/scripts/claude-login-notifier.sh" \
         "ha-notify:/opt/scripts/ha-notify.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
@@ -600,6 +618,14 @@ start_automation_api() {
     fi
 }
 
+# Start Claude login URL notification daemon
+start_login_notifier() {
+    if [ -f "/usr/local/bin/claude-login-notifier" ]; then
+        bashio::log.info "Starting Claude login URL notification daemon..."
+        /usr/local/bin/claude-login-notifier &
+    fi
+}
+
 # Main execution
 main() {
     bashio::log.info "Starting Claude Terminal add-on..."
@@ -609,6 +635,7 @@ main() {
     update_claude
     configure_git
     start_automation_api
+    start_login_notifier
 
     # Everything below this line used to run in the FOREGROUND before
     # exec ttyd: apk/pip installs with no timeout, and two cold starts of a

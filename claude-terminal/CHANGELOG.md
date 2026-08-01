@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.1-wdn.7
+
+### ✨ Automated OAuth Login Notifications & Terminal Mouse Fixes
+- **Automated Login Link Notifications**: Added `claude-login-notifier` daemon running in the background. Automatically detects Claude Code sign-in OAuth URLs printed in tmux and posts a Home Assistant persistent notification with a direct Markdown hyperlink (`[👉 Authorize Claude Code]`). Automatically dismisses the notification once signed in.
+- **Improved Terminal Copy/Click**: Added `tmux_mouse` configuration option, defaulting to `false`. Disabling `tmux` mouse mode enables native browser mouse text selection, standard system clipboard copy (`Ctrl+C` / `Cmd+C`), and direct single-click URL opening in the web terminal without mouse interception or `"copied XX chars to tmux buffer"` messages.
+
 ## 2.5.1-wdn.6
 
 ### 📚 Documentation & Agent Context Updates
