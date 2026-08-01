@@ -310,6 +310,16 @@ curl -X POST -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
 ```
 
 Available endpoints: `states`, `services`, `config`, `events`, `error_log`, `history/period`
+
+## Home Assistant Automation API
+
+This add-on runs an Automation API server allowing Home Assistant automations, scripts, and blueprints to invoke non-interactive Claude Code prompts (`claude -p "..."`).
+
+- **Endpoint**: `POST http://claude_terminal_wdn:8128/api/prompt` (or internal port set in `automation_api_port`)
+- **Authentication**: Requires `X-API-Key` or `Authorization: Bearer` header matching the token stored in `/data/automation_api_token`.
+- **Payload Schema**: `{"prompt": "Your prompt text", "timeout": 120}`
+- **Response Schema**: `{"success": true, "response": "Output text", "duration_seconds": 3.42, "exit_code": 0}`
+- **Security Controls**: Internal container bridge network isolation, IP subnet filtering, single-process mutex lock, rate-limiting (10 req/min), and safe parameterized subprocess execution.
 APIREF
 
     # Atomic move
