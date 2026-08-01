@@ -64,8 +64,14 @@ claude -c       # continue the most recent conversation
 claude -r       # pick a past conversation to resume
 ha-diagnose     # one-command Home Assistant & add-on system health check
 ha-validate     # validate HA configuration via API (use --safe-edit <file> for backup safety)
+ha-dashboard    # generate Lovelace YAML dashboard by domain or area (<domain_or_area>)
+ha-mesh         # scan Zigbee, Z-Wave & Matter mesh network health and low batteries
+ha-memory       # search HA historical event and state transitions (<entity_id> [hours])
 ha-snapshot     # capture camera image for Claude vision inspection (<camera_entity>)
-ha-scaffold     # generate boilerplate for a new HA custom integration (<domain>)
+ha-scaffold     # generate boilerplate for custom integration (<domain>) or PyScript (pyscript <name>)
+ha-git-backups  # git config time-machine backup and 1-click rollback (commit|rollback)
+ha-assist       # query HA Assist voice conversation pipeline (<prompt>)
+claude-bot      # remote messaging gateway for Telegram, Matrix, Discord (forward <prompt>)
 claude-cron     # manage autonomous background scheduled prompts (add|list|remove)
 esphome-setup   # install & persist ESPHome CLI toolchain
 ha-tts          # send text-to-speech announcement to HA media player

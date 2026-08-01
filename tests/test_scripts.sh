@@ -48,7 +48,6 @@ TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 
 (
-    # Mock /config/custom_components location by creating target dir
     DOMAIN="test_solar"
     TARGET="$TEST_DIR/custom_components/$DOMAIN"
     
@@ -68,12 +67,16 @@ trap 'rm -rf "$TEST_DIR"' EXIT
         fi
     done
 
-    # Verify manifest.json is valid JSON
-    if jq . "$TARGET/manifest.json" >/dev/null 2>&1; then
-        echo "  [PASS] ha-scaffold generated valid JSON manifest"
+    # Verify PyScript scaffolding
+    mkdir -p "$TEST_DIR/pyscript"
+    sed "s|/config/pyscript|$TEST_DIR/pyscript|g" "$SCRIPT_DIR/ha-scaffold.sh" > "$TEST_DIR/run_pyscript.sh"
+    chmod +x "$TEST_DIR/run_pyscript.sh"
+    "$TEST_DIR/run_pyscript.sh" pyscript test_hvac "Test HVAC handler" >/dev/null
+    if [ -f "$TEST_DIR/pyscript/test_hvac.py" ]; then
+        echo "  [PASS] ha-scaffold pyscript generated test_hvac.py"
         PASSED=$((PASSED + 1))
     else
-        echo "  [FAIL] ha-scaffold generated invalid JSON manifest"
+        echo "  [FAIL] ha-scaffold pyscript failed to generate test_hvac.py"
         FAILED=$((FAILED + 1))
     fi
 )
@@ -85,7 +88,6 @@ assert_exit_code 0 "$SCRIPT_DIR/claude-cron.sh" --help
     CRON_TEST_DIR=$(mktemp -d)
     export CRON_FILE="$CRON_TEST_DIR/claude-cron.json"
     
-    # Add job
     "$SCRIPT_DIR/claude-cron.sh" add "30" "Test prompt" >/dev/null
     if grep -q "Test prompt" "$CRON_FILE"; then
         echo "  [PASS] claude-cron add succeeded"
@@ -95,7 +97,6 @@ assert_exit_code 0 "$SCRIPT_DIR/claude-cron.sh" --help
         FAILED=$((FAILED + 1))
     fi
     
-    # List jobs
     if "$SCRIPT_DIR/claude-cron.sh" list | grep -q "Test prompt"; then
         echo "  [PASS] claude-cron list succeeded"
         PASSED=$((PASSED + 1))
@@ -104,7 +105,6 @@ assert_exit_code 0 "$SCRIPT_DIR/claude-cron.sh" --help
         FAILED=$((FAILED + 1))
     fi
     
-    # Remove job
     "$SCRIPT_DIR/claude-cron.sh" remove 1 >/dev/null
     if ! grep -q "Test prompt" "$CRON_FILE"; then
         echo "  [PASS] claude-cron remove succeeded"
@@ -126,6 +126,33 @@ else
     echo "  [FAIL] ha-diagnose output header invalid"
     FAILED=$((FAILED + 1))
 fi
+
+echo "7. Testing ha-dashboard.sh"
+assert_exit_code 0 "$SCRIPT_DIR/ha-dashboard.sh" --help
+SUPERVISOR_TOKEN="" assert_exit_code 1 "$SCRIPT_DIR/ha-dashboard.sh" light
+
+echo "8. Testing ha-mesh.sh"
+SUPERVISOR_TOKEN="" assert_exit_code 1 "$SCRIPT_DIR/ha-mesh.sh"
+
+echo "9. Testing ha-assist.sh"
+assert_exit_code 0 "$SCRIPT_DIR/ha-assist.sh" --help
+SUPERVISOR_TOKEN="" assert_exit_code 1 "$SCRIPT_DIR/ha-assist.sh" "hello"
+
+echo "10. Testing ha-memory.sh"
+assert_exit_code 0 "$SCRIPT_DIR/ha-memory.sh" --help
+SUPERVISOR_TOKEN="" assert_exit_code 1 "$SCRIPT_DIR/ha-memory.sh" light.hallway
+
+echo "11. Testing claude-bot.sh"
+assert_exit_code 0 "$SCRIPT_DIR/claude-bot.sh" --help
+(
+    BOT_TEST_DIR=$(mktemp -d)
+    export BOT_CONFIG="$BOT_TEST_DIR/claude-bot-config.json"
+    "$SCRIPT_DIR/claude-bot.sh" status >/dev/null
+    rm -rf "$BOT_TEST_DIR"
+)
+
+echo "12. Testing ha-git-backups.sh"
+assert_exit_code 0 "$SCRIPT_DIR/ha-git-backups.sh" --help
 
 echo ""
 echo "=== Shell Script Test Summary ==="

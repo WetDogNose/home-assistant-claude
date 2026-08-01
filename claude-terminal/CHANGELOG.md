@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.5.1-wdn.11
+
+### 🚀 Next-Gen Advanced Capability Suite
+- **`ha-dashboard`**: Lovelace YAML dashboard generator by area or entity domain.
+- **`ha-mesh`**: Mesh network (Zigbee/Z-Wave/Matter) health inspector and low-battery scanner.
+- **`ha-scaffold pyscript`**: Added PyScript automation handler generator (`ha-scaffold pyscript <name>`) under `/config/pyscript/`.
+- **`ha-assist`**: Home Assistant Assist voice pipeline interface.
+- **`ha-memory`**: Historical event and state transition query tool.
+- **`claude-bot`**: Remote messaging gateway (Telegram, Matrix, Discord) for Claude Terminal.
+- **`ha-git-backups`**: Automated `/config` git commits with 1-click `rollback` functionality.
+- Updated `tmux` quick-bar (`Ctrl+B h`) and `welcome` banner listings.
+
 ## 2.5.1-wdn.10
 
 ### ✨ New Developer Utilities & Home Assistant Tools
