@@ -2,6 +2,19 @@
 
 This guide covers local development and testing workflows for the Claude Terminal add-on.
 
+## Automated Testing & Validation
+
+Before submitting PRs or tagging releases, run the comprehensive local validation suite:
+
+```bash
+# Run all local validation checks (ShellCheck, docs drift, shell tests, python tests)
+./ci/local-validate.sh
+
+# Run unit test suites directly
+./tests/test_scripts.sh
+python3 -m unittest discover tests/
+```
+
 ## Local Container Testing
 
 ### Prerequisites

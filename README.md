@@ -7,7 +7,7 @@
 Write automations, debug YAML and control your instance in plain language —
 without leaving the Home Assistant sidebar.
 
-![Version](https://img.shields.io/badge/version-2.5.1--wdn.9-d97757?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.1--wdn.10-d97757?style=for-the-badge)
 ![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-2b5b84?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
@@ -27,7 +27,12 @@ without leaving the Home Assistant sidebar.
 |  | Feature |
 |:--:|---|
 | 🖥️ | **Just Claude Code** — opens straight into Claude, no menus in the way |
-| 🤖 | **Automation API** — call Claude non-interactively from Home Assistant automations via secure HTTP endpoint |
+| 🤖 | **Automation API & Blueprint** — call Claude non-interactively from Home Assistant automations via secure HTTP endpoint or HA blueprint |
+| 🛡️ | **YAML Guardrails & Validation** — `ha-validate` checks config and auto-restores backups on syntax error |
+| 📷 | **Camera Vision** — `ha-snapshot` captures camera frames for Claude visual analysis |
+| 🛠️ | **Dev & ESPHome Tools** — `ha-scaffold` generates custom component boilerplate; `esphome-setup` installs ESPHome CLI |
+| ⏰ | **Autonomous Scheduler** — `claude-cron` runs periodic background prompts and posts HA notifications |
+| ⌨️ | **Quick-Bar & Diagnostics** — `ha-diagnose` for system health; `Ctrl+B h` popup menu for fast actions |
 | 🏠 | **Knows your setup** — version, entities and apps are summarised for Claude automatically |
 | 🔌 | **Controls Home Assistant** — bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language device and automation control |
 | 🔁 | **Survives reloads** — tmux keeps your conversation alive across browser refreshes and navigation |
