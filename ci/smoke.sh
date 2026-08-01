@@ -22,7 +22,8 @@ rc=0
 for s in /run.sh /opt/scripts/setup-ha-mcp.sh /opt/scripts/health-check.sh \
          /opt/scripts/persist-install.sh /opt/scripts/ha-context.sh \
          /opt/scripts/github-setup.sh /opt/scripts/claude-launch.sh \
-         /opt/scripts/data-gc.sh /opt/scripts/ha-notify.sh /opt/scripts/welcome.sh; do
+         /opt/scripts/data-gc.sh /opt/scripts/ha-notify.sh /opt/scripts/welcome.sh \
+         /opt/scripts/claude-api-server.py; do
   if [ -x "$s" ]; then echo "OK: $s"; else echo "FAIL: $s not executable"; rc=1; fi
 done
 exit $rc

@@ -74,6 +74,9 @@ Your credentials are stored under `/data` and persist across restarts and add-on
 | `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
 | `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run. |
+| `enable_automation_api` | `true` | Enable the HTTP Automation API daemon (port 8128) to trigger Claude non-interactively from HA automations. |
+| `automation_api_port` | `8128` | Container port for the Automation API server. |
+| `automation_api_key` | `""` | Optional static API key. If empty, a random 32-character token is auto-generated in `/data/automation_api_token`. |
 | `git_user_name` | `""` | Name used to author git commits made from the terminal. Reapplied on every restart. |
 | `git_user_email` | `""` | Email used to author git commits made from the terminal. Reapplied on every restart. |
 | `persistent_apk_packages` | `[]` | APK packages reinstalled on every startup. |
@@ -119,6 +122,62 @@ The bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server connects
 ha-mcp requires Python 3.13, which Alpine doesn't ship — the add-on provisions a managed Python build via [uv](https://github.com/astral-sh/uv) into `/data` on first use (a one-time ~150–250 MB download that persists across restarts and is included in HA backups). The environment is pre-warmed in the background at startup so the first MCP connection is fast.
 
 Disable it with `enable_ha_mcp: false` if you don't want Claude to have this access.
+
+## Home Assistant Automations (Automation API)
+
+The add-on includes a built-in Automation API daemon that lets Home Assistant automations, scripts, and blueprints execute Claude prompts non-interactively (`claude -p "..."`).
+
+### Security Controls
+
+- **Token Authentication**: All requests require an `X-API-Key` or `Authorization: Bearer` header. On first boot, if `automation_api_key` is empty, a random 32-character secret token is generated in `/data/automation_api_token`.
+- **Container Network Isolation**: Port `8128` is not exposed to the physical LAN (`ports:` is omitted in `config.yaml`). It is accessible only internally over the Home Assistant `hassio` Docker bridge network.
+- **Client IP Whitelisting**: Only calls originating from internal container subnets (`172.16-31.x.x`, `10.x.x.x`, `127.0.0.1`) are accepted.
+- **Process Mutex & Rate Limiting**: Prompts are executed sequentially (max 1 active process) with a 10 requests/minute rate limit per IP.
+- **Command Injection Safety**: Prompts are passed directly via array arguments to `subprocess.run(..., shell=False)`.
+
+### Getting Your API Token
+
+Inside the terminal or via Home Assistant's File Editor / Samba, inspect your token:
+```bash
+cat /data/automation_api_token
+```
+
+Store this token in your Home Assistant `secrets.yaml`:
+```yaml
+claude_api_token: "YOUR_32_CHAR_TOKEN"
+```
+
+### Home Assistant Setup Example
+
+1. **Add `rest_command` to `configuration.yaml`**:
+   ```yaml
+   rest_command:
+     claude_prompt:
+       url: "http://claude_terminal_wdn:8128/api/prompt"
+       method: POST
+       headers:
+         Content-Type: "application/json"
+         X-API-Key: "!secret claude_api_token"
+       payload: '{"prompt": "{{ prompt }}"}'
+       timeout: 120
+   ```
+
+2. **Automation Example (Daily Home Audit)**:
+   ```yaml
+   alias: "Claude Daily Security & Energy Summary"
+   trigger:
+     - trigger: time
+       at: "21:30:00"
+   action:
+     - action: rest_command.claude_prompt
+       data:
+         prompt: "Check all door sensors and energy usage, then send a summary notification"
+       response_variable: claude_result
+     - action: persistent_notification.create
+       data:
+         title: "Claude Home Audit"
+         message: "{{ claude_result.content.response }}"
+   ```
 
 ## GitHub
 

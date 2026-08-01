@@ -7,7 +7,7 @@
 Write automations, debug YAML and control your instance in plain language —
 without leaving the Home Assistant sidebar.
 
-![Version](https://img.shields.io/badge/version-2.5.1--wdn.1-d97757?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.1--wdn.5-d97757?style=for-the-badge)
 ![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-2b5b84?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
@@ -27,6 +27,7 @@ without leaving the Home Assistant sidebar.
 |  | Feature |
 |:--:|---|
 | 🖥️ | **Just Claude Code** — opens straight into Claude, no menus in the way |
+| 🤖 | **Automation API** — call Claude non-interactively from Home Assistant automations via secure HTTP endpoint |
 | 🏠 | **Knows your setup** — version, entities and add-ons are summarised for Claude automatically |
 | 🔌 | **Controls Home Assistant** — bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language device and automation control |
 | 🔁 | **Survives reloads** — tmux keeps your conversation alive across browser refreshes and navigation |

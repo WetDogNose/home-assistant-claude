@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.4"
+version: "2.5.1-wdn.5"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -53,6 +53,9 @@ options:
   ha_smart_context: true
   enable_ha_mcp: true
   ha_mcp_version: "7.11.0"
+  enable_automation_api: true
+  automation_api_port: 8128
+  automation_api_key: ""
   git_user_name: ""
   git_user_email: ""
   persistent_apk_packages: []
@@ -85,6 +88,9 @@ schema:
   ha_smart_context: bool?
   enable_ha_mcp: bool?
   ha_mcp_version: str?
+  enable_automation_api: bool?
+  automation_api_port: port?
+  automation_api_key: str?
   # Commit identity for git operations from the terminal. GitHub itself is
   # authenticated interactively with `github-setup`, deliberately keeping the
   # token out of this file -- /data/options.json is plaintext and is included
