@@ -12,6 +12,8 @@ without leaving the Home Assistant sidebar.
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
 
+[![Open your Home Assistant instance and add this add-on repository.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FWetDogNose%2Fhome-assistant-claude)
+
 </div>
 
 ---
@@ -51,6 +53,12 @@ without leaving the Home Assistant sidebar.
 
 ## Install
 
+Click the badge to open your own Home Assistant with this repository pre-filled:
+
+[![Open your Home Assistant instance and add this add-on repository.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FWetDogNose%2Fhome-assistant-claude)
+
+Or add it by hand:
+
 1. In Home Assistant, go to **Settings** → **Apps** → **App Store**
 2. Click the **⋮** menu in the top right and choose **Repositories**
 3. Add this repository URL and click **Add**:
@@ -58,6 +66,8 @@ without leaving the Home Assistant sidebar.
    ```text
    https://github.com/WetDogNose/home-assistant-claude
    ```
+
+Either way, then:
 
 4. Find **Claude Terminal (WetDogNose)** in the store and click **Install**
 5. Start the app, then click **OPEN WEB UI** or open it from the sidebar
@@ -263,6 +273,11 @@ can inspect here — the add-on runs as root with broad access, so it is worth
 controlling what actually ships. Both projects are MIT licensed.
 
 Original work © Tom Cassady and contributors. See **[LICENSE](LICENSE)**.
+
+The MIT licence covers the add-on code in this repository. Claude Code itself
+is Anthropic software and is subject to
+[Anthropic's Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms),
+not to this licence.
 
 <div align="center">
 <sub>Built with Claude Code — development, debugging and documentation alike.</sub>
