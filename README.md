@@ -7,7 +7,7 @@
 Write automations, debug YAML and control your instance in plain language —
 without leaving the Home Assistant sidebar.
 
-![Version](https://img.shields.io/badge/version-2.5.1--wdn.8-d97757?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.1--wdn.9-d97757?style=for-the-badge)
 ![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-2b5b84?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
