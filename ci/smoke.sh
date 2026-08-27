@@ -37,6 +37,19 @@ exit $rc
 IN
 then rc=1; fi
 
+# login-url-lib.sh is sourced, never invoked, so it is absent from the command
+# list above -- and a missing copy of it takes the sign-in notification down
+# silently, which is the failure this add-on can least afford.
+echo "== sourced libraries are present =="
+if ! run <<'IN'
+rc=0
+for l in /opt/scripts/login-url-lib.sh; do
+  if [ -f "$l" ]; then echo "OK: $l"; else echo "FAIL: $l missing"; rc=1; fi
+done
+exit $rc
+IN
+then rc=1; fi
+
 # Skills are what tell the Claude session inside the add-on how its own tooling
 # works. A skill missing from the image fails silently -- Claude simply never
 # learns the command exists -- so the shipped set is asserted here rather than

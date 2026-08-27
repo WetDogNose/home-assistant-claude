@@ -335,6 +335,97 @@ else
     FAILED=$((FAILED + 1))
 fi
 
+echo "17. Testing sign-in URL reassembly"
+
+# Claude Code hard-wraps the sign-in URL to the terminal width, so the pane
+# holds several real lines rather than one soft-wrapped one. The notification
+# used to grep the first of them and send a URL missing its PKCE tail: a link
+# that opens and then fails to authorize. These cases pin the reassembly.
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/login-url-lib.sh"
+
+LOGIN_URL='https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Aprofile+user%3Ainference&code_challenge=Ky7bV9pQ2mNx4LrT8sZaWc1dEfGhIjKlMnOpQrStUvW&code_challenge_method=S256&state=Ab3cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX4yZ5aB6c'
+
+# NOT fed from a pipe: a piped call runs in a subshell, and every PASSED /
+# FAILED increment below it is discarded when that subshell exits.
+assert_extracts() {
+    local name="$1" expected="$2" text="$3" actual
+    actual=$(printf '%s\n' "$text" | login_url_from_text)
+    if [ "$actual" = "$expected" ]; then
+        echo "  [PASS] login URL reassembly: $name"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] login URL reassembly: $name"
+        echo "         expected: $expected"
+        echo "         actual:   $actual"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+# Every width the add-on realistically renders at, plus the un-wrapped case.
+for width in 40 60 80 100 120; do
+    assert_extracts "hard-wrapped at $width columns" "$LOGIN_URL" \
+        "$(printf '%s' "$LOGIN_URL" | fold -w "$width")"
+done
+
+LOGIN_SCREEN=$(
+    printf '%s\n\n' "Browser did not open? Use the url below to sign in (c to copy)"
+    printf '%s' "$LOGIN_URL" | fold -w 80
+    printf '\n\n%s\n' "Paste code here if prompted > "
+)
+assert_extracts "surrounded by the rest of the login screen" "$LOGIN_URL" "$LOGIN_SCREEN"
+
+# capture-pane -J preserves trailing spaces, so the joiner has to trim.
+assert_extracts "wrapped with trailing whitespace" "$LOGIN_URL" \
+    "$(printf '%s' "$LOGIN_URL" | fold -w 80 | sed 's/$/   /')"
+
+# A URL that already ended mid-line was never wrapped, so the word on the line
+# below it is a word and not the rest of the URL.
+assert_extracts "printed inline on one line" "$LOGIN_URL" \
+    "$(printf 'If the browser did not open, visit: %s\ndone\n' "$LOGIN_URL")"
+
+# A stale URL higher up the scrollback must not be glued to the current one.
+SCROLLBACK=$(
+    echo "https://claude.ai/oauth/authorize?code=true&state=OLDOLDOLDOLDOLDOLDOLD"
+    printf '%s' "$LOGIN_URL" | fold -w 60
+)
+assert_extracts "a second URL replaces the first" "$LOGIN_URL" "$SCROLLBACK"
+
+assert_extracts "no URL present" "" "no URLs on screen at all"
+
+# The completeness check is what keeps a broken link out of the notification.
+for url in "$LOGIN_URL" "${LOGIN_URL}&orgUUID=1234"; do
+    if login_url_is_complete "$url"; then
+        echo "  [PASS] login_url_is_complete accepts a whole sign-in URL"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] login_url_is_complete rejected a whole sign-in URL: $url"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+for url in "${LOGIN_URL:0:80}" "${LOGIN_URL:0:300}" "https://code.claude.com/docs/en/overview" ""; do
+    if login_url_is_complete "$url"; then
+        echo "  [FAIL] login_url_is_complete accepted an unusable URL: $url"
+        FAILED=$((FAILED + 1))
+    else
+        echo "  [PASS] login_url_is_complete rejects '${url:0:40}'"
+        PASSED=$((PASSED + 1))
+    fi
+done
+
+# Both consumers must go through the library; a local grep here is the bug.
+for consumer in claude-login-url.sh claude-login-notifier.sh; do
+    if grep -q 'login-url-lib.sh' "$SCRIPT_DIR/$consumer" \
+        && ! grep -q 'grep -oE "https://' "$SCRIPT_DIR/$consumer"; then
+        echo "  [PASS] $consumer reassembles the URL via login-url-lib.sh"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $consumer does not use login-url-lib.sh to reassemble the URL"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
 echo ""
 echo "=== Shell Script Test Summary ==="
 echo "Passed: $PASSED"

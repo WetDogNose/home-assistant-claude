@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.5.1-wdn.16
+
+### 🔗 The sign-in link in the notification now works
+
+The "Claude Terminal Sign-In Required" notification carried a URL that opened
+and then failed to authorize. It was truncated: everything past the first
+terminal width was missing, so `code_challenge`, `code_challenge_method` and
+`state` never reached claude.com.
+
+Claude Code renders the sign-in URL through Ink, which **hard-wraps** it to the
+terminal width — the pane holds four or five separate lines, each ending in a
+newline Claude Code wrote itself. `tmux capture-pane -J` rejoins lines the
+*terminal* soft-wrapped and cannot touch those, so the `grep -o https://...`
+behind the notification matched the first line and stopped there. On an 80
+column terminal that is 80 characters of a 450 character URL.
+
+The reassembly now lives in `login-url-lib.sh`, shared by the notification
+daemon and `claude-login-url`: it finds the line the URL starts on and appends
+the lines below it while they still look like the continuation of a wrapped
+URL. It also refuses to send anything that is still missing its PKCE tail, so a
+half-drawn frame, or a docs link that happened to be on screen, no longer
+becomes a "sign in here" notification with the wrong link in it.
+
+`claude-login-url` was truncating the same way, so the copy it writes to
+`/config/claude-login-url.txt` was equally unusable and is fixed by the same
+change. Its notification now carries the clickable link too.
+
 ## 2.5.1-wdn.15
 
 ### ⬆️ Dependency refresh
