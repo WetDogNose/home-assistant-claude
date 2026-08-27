@@ -96,7 +96,7 @@ full reference lives in **[DOCS.md](claude-terminal/DOCS.md)**.
 | `claude_extra_args` | `""` | Extra flags for every launch |
 | `ha_smart_context` | `true` | Summarise your HA setup for Claude |
 | `enable_ha_mcp` | `true` | Let Claude control Home Assistant |
-| `ha_mcp_version` | `7.11.0` | Which ha-mcp release backs that connection |
+| `ha_mcp_version` | `8.3.0` | Which ha-mcp release backs that connection |
 | `git_user_name` / `git_user_email` | `""` | Commit identity for git |
 | `persistent_apk_packages` | `[]` | apk packages reinstalled each boot |
 | `persistent_pip_packages` | `[]` | pip packages reinstalled each boot |

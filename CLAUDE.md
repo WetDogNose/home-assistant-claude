@@ -21,7 +21,7 @@ Shell aliases: `build-addon`, `run-addon`, `lint-dockerfile`, `test-endpoint`, `
 
 ```bash
 # Build (BUILD_FROM is required — the Dockerfile has no default base)
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal ./claude-terminal
 
 # Run complete local validation suite (linting + docs drift + shell & python unit tests)
@@ -98,7 +98,7 @@ All options are read via `bashio::config` (from `/data/options.json`):
 
 ### Notable subsystem constraints
 - **Automation API**: `claude-api-server.py` runs an HTTP daemon on port 8128 (or `automation_api_port`). Authenticates via `X-API-Key` or `Authorization: Bearer <token>` matching `/data/automation_api_token` or `automation_api_key`. Restricts calls to local Docker container subnets and serializes `claude -p` execution via a process mutex lock.
-- **ha-mcp** requires CPython 3.13 exactly; Alpine 3.21 ships 3.12, so `uvx --python 3.13` provisions a managed musl build into `/data` (hence the pinned `uv==0.11.28` from PyPI — Alpine's apk `uv` can't do this). `--index-strategy unsafe-best-match` is required for the HA wheels index.
+- **ha-mcp** requires CPython 3.13 exactly; Alpine 3.23 ships 3.12 (and 3.24 ships 3.14), so `uvx --python 3.13` provisions a managed musl build into `/data` (hence `uv` from PyPI rather than apk — Alpine's apk `uv` historically couldn't do this). `--index-strategy unsafe-best-match` is required for the HA wheels index.
 - **Clipboard**: ttyd advertises `TERM=xterm-256color`, whose terminfo lacks `Ms`, so `tmux.conf` teaches tmux the OSC 52 escape explicitly. OSC 52 truncates around ~400 chars, which is shorter than Claude's OAuth login URL — that's the entire reason `claude-login-url` exists (it `capture-pane -J`s the URL out of the session into `/config`).
 - **tmux status bar** shells out to `scripts/tmux-status.sh` every 15s; it must stay fast (<1s) and needs no bashio.
 - **GitHub** is the `gh` CLI from Alpine community (no MCP server). Credentials persist for free because `gh` reads `$XDG_CONFIG_HOME/gh` and `init_environment` already points `XDG_CONFIG_HOME` at `/data/.config` — don't add persistence code for it. Authentication is interactive (`github-setup`) by design: there is no token option, because `/data/options.json` is plaintext and rides along in HA backups.
@@ -137,7 +137,7 @@ Keep `claude-terminal/DOCS.md` (the options table and troubleshooting shown in t
 Full workflows are in `DEVELOPMENT.md`. The short loop:
 
 ```bash
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal:test ./claude-terminal
 
 mkdir -p /tmp/test-config /tmp/test-data

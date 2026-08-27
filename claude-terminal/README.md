@@ -76,7 +76,7 @@ Works out of the box. All options:
 | `claude_extra_args` | `""` | Extra flags for every Claude launch |
 | `ha_smart_context` | `true` | Generate HA context file for Claude |
 | `enable_ha_mcp` | `true` | Home Assistant MCP server integration |
-| `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run |
+| `ha_mcp_version` | `"8.3.0"` | ha-mcp release to run |
 | `enable_automation_api` | `true` | Enable HTTP Automation API daemon (port 8128) |
 | `automation_api_port` | `8128` | Container port for Automation API server |
 | `automation_api_key` | `""` | Custom API key (auto-generated in `/data/automation_api_token` if empty) |

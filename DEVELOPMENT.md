@@ -29,7 +29,7 @@ The fastest way to test changes without publishing new versions:
 
 ```bash
 # 1. Build test container
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal:test ./claude-terminal
 
 # 2. Create test configuration (options.json lives in /data inside a real add-on)
@@ -61,7 +61,7 @@ podman stop test-claude-dev && podman rm test-claude-dev
 vim claude-terminal/run.sh
 
 # Rebuild image
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal:test ./claude-terminal
 
 # Stop old container
@@ -236,7 +236,7 @@ ls -laZ /tmp/test-config/
 #### Build Cache Issues
 ```bash
 # Force rebuild without cache
-podman build --no-cache --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --no-cache --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal:test ./claude-terminal
 
 # Clean up unused images
@@ -304,9 +304,9 @@ podman run -d --name test-ha-claude -p 7681:7681 \
 
 ```bash
 # Test architecture base images (amd64 and aarch64 supported)
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23 \
   -t local/claude-terminal:amd64 ./claude-terminal
 
-podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.21 \
+podman build --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base:3.23 \
   -t local/claude-terminal:arm64 ./claude-terminal
 ```

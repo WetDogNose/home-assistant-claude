@@ -30,7 +30,7 @@ configure_ha_mcp_server() {
     fi
 
     local version
-    version=$(bashio::config 'ha_mcp_version' '7.11.0')
+    version=$(bashio::config 'ha_mcp_version' '8.3.0')
 
     # Remove existing ha-mcp configuration if present (to ensure clean state)
     claude mcp remove home-assistant 2>/dev/null || true

@@ -58,6 +58,11 @@ jobs:
           echo "owner=${owner}" >> "$GITHUB_OUTPUT"
           echo "Publishing to ghcr.io/${owner}"
 
+      # Pinned to 2026.02.1 on purpose -- this action pulls
+      # ghcr.io/home-assistant/{arch}-builder:<its own ref>, and no builder
+      # image was published after 2026.02.1 (upstream deprecated the action in
+      # favour of composable actions/build-image). A newer pin 404s the pull.
+      # See the ignore entry and verification command in .github/dependabot.yml.
       - name: Build and push add-on image
         uses: home-assistant/builder@6cb4fd3d1338b6e22d0958a4bcb53e0965ea63b4 # 2026.02.1
         with:
