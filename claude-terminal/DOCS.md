@@ -43,7 +43,7 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `claude_extra_args` | `""` | Extra flags appended to every Claude launch, e.g. `--model claude-sonnet-5`. Values are split on spaces; quoted multi-word arguments are not supported. |
 | `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
-| `ha_mcp_version` | `"7.11.0"` | ha-mcp release to run. |
+| `ha_mcp_version` | `"8.3.0"` | ha-mcp release to run. |
 | `enable_automation_api` | `true` | Enable the HTTP Automation API daemon (port 8128) to trigger Claude non-interactively from HA automations. |
 | `automation_api_port` | `8128` | Container port for the Automation API server. |
 | `automation_api_key` | `""` | Optional static API key. If empty, a random 32-character token is auto-generated in `/data/automation_api_token`. |

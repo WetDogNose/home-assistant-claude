@@ -1,5 +1,46 @@
 # Changelog
 
+## 2.5.1-wdn.15
+
+### ⬆️ Dependency refresh
+
+Routine maintenance release: no behaviour change beyond the versions below.
+
+**ha-mcp 7.11.0 → 8.3.0.** The default `ha_mcp_version`. The stdio contract the
+add-on depends on is unchanged — `uvx ha-mcp` still runs FastMCP's stdio
+transport and still reads `HOMEASSISTANT_URL` / `HOMEASSISTANT_TOKEN` — and the
+only entry point 8.0 removed (`ha-mcp-sse`) was never used here. 8.x brings
+per-item failure reporting for bulk operations, `state_filter`-only `ha_search`,
+an opt-in entity visibility filter, and translated tool surfaces.
+
+Note this default applies to **new** installs. An existing install has
+`ha_mcp_version` stored in its own options, so it stays on 7.11.0 until you
+change it in the add-on configuration.
+
+**GitHub Actions.** `docker/setup-buildx-action` → v4.3.0,
+`hadolint/hadolint-action` → v3.5.0 (hadolint 2.15.1; the Dockerfile still
+passes at the `error` threshold), `github/codeql-action/upload-sarif` and
+`anthropics/claude-code-action` moved to the current commit behind their major
+tags. `unit-tests.yml` was the one workflow still using floating tags —
+`actions/checkout@v4` and `actions/setup-python@v5` are now SHA-pinned like
+every other action in the repo, at v7 and v7.0.0.
+
+**Nix dev shell.** `flake.lock` nixpkgs moved from 2025-06-17 to 2026-08-23.
+Affects `nix develop` only; nothing shipped in the image comes from it.
+
+Deliberately **not** updated:
+
+- **`home-assistant/builder`** stays at 2026.02.1. The action pulls
+  `ghcr.io/home-assistant/{arch}-builder:<its own pinned ref>`, and upstream
+  stopped publishing those images after 2026.02.1 when it deprecated the action
+  in favour of composable `actions/build-image`. Bumping the pin would 404 the
+  pull and break publishing; migrating is a separate piece of work.
+- **Alpine base 3.23.** 3.24 moves python3 to 3.14, whose musllinux wheel
+  coverage on the HA index would silently break `persistent_pip_packages` —
+  the reasoning already recorded in `build.yaml`.
+- **Bundled Claude Code, `uv`, apk packages.** All float to latest at image
+  build time by design; there is no pin to bump.
+
 ## 2.5.1-wdn.14
 
 ### 🧠 Claude now knows how to use the add-on's own tools
