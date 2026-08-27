@@ -8,6 +8,24 @@
 
 set -u
 
+# Reassembling the URL out of the pane is login-url-lib.sh's job: Claude Code
+# hard-wraps the sign-in URL across several terminal lines, and a plain grep
+# over the capture notifies with the first ~80 characters of it -- a link that
+# opens and then fails to authorize.
+LIB=""
+for candidate in "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/login-url-lib.sh" \
+                 /opt/scripts/login-url-lib.sh; do
+    if [ -f "$candidate" ]; then LIB="$candidate"; break; fi
+done
+
+if [ -z "$LIB" ]; then
+    echo "claude-login-notifier: login-url-lib.sh not found; not starting." >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+. "$LIB"
+
 STATE_DIR="/run/claude-terminal"
 LAST_URL_FILE="${STATE_DIR}/last_notified_url"
 NOTIFIED_FLAG="${STATE_DIR}/notification_active"
@@ -51,10 +69,10 @@ while true; do
         continue
     fi
 
-    # Capture pane output from the tmux session
-    url=$(tmux capture-pane -p -J -t claude -S -500 2>/dev/null \
-        | grep -oE "https://(claude\.(com|ai)|console\.anthropic\.com|platform\.claude\.com)[^[:space:]\"'\`)<>]*" \
-        | tail -1)
+    # Capture the sign-in URL from the tmux session. capture_login_url returns
+    # non-zero unless it reassembled a whole URL, so a half-drawn frame or a
+    # docs link that happens to be on screen never becomes a notification.
+    url=$(capture_login_url) || url=""
 
     if [ -n "$url" ]; then
         last_url=""

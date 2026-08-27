@@ -8,18 +8,32 @@
 # Why: the browser terminal's OSC 52 clipboard path truncates long payloads
 # (~400 chars), and Claude Code's login URL is ~450+ chars — the tail (the
 # `state` parameter) gets cut off, which makes authorization fail with
-# "Invalid request format". capture-pane with -J joins soft-wrapped lines,
-# so the URL comes out intact regardless of terminal width.
+# "Invalid request format".
+#
+# Reassembling the URL out of the pane is login-url-lib.sh's job: Claude Code
+# hard-wraps it, so it arrives as several separate lines that capture-pane
+# cannot rejoin on its own.
+
+LIB=""
+for candidate in "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/login-url-lib.sh" \
+                 /opt/scripts/login-url-lib.sh; do
+    if [ -f "$candidate" ]; then LIB="$candidate"; break; fi
+done
+
+if [ -z "$LIB" ]; then
+    echo "claude-login-url: login-url-lib.sh not found." >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+. "$LIB"
 
 OUT="${1:-/config/claude-login-url.txt}"
 
-url=$(tmux capture-pane -p -J -t claude -S -500 2>/dev/null \
-    | grep -oE "https://(claude\.(com|ai)|console\.anthropic\.com|platform\.claude\.com)[^[:space:]\"'\`)<>]*" \
-    | tail -1)
-
-if [ -z "$url" ]; then
-    echo "No login URL found in the Claude session." >&2
-    echo "Start the login in Claude first (run /login), then run this command again." >&2
+if ! url=$(capture_login_url); then
+    echo "No complete login URL found in the Claude session." >&2
+    echo "Start the login in Claude first (run /login), leave the URL on screen," >&2
+    echo "then run this command again." >&2
     exit 1
 fi
 
@@ -35,6 +49,9 @@ if [ -x /usr/local/bin/ha-notify ]; then
         "Claude Terminal sign-in" \
         "Open this URL to authorise Claude Code, then return to the terminal and paste the code:
 
+[👉 Authorize Claude Code](${url})
+
+Or copy the URL:
 ${url}
 
 Dismiss this notification once you are signed in." \
