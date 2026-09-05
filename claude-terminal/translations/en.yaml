@@ -71,6 +71,46 @@ configuration:
       entities - to a file Claude reads automatically, so you do not have to
       explain your setup in every conversation.
 
+  ha_context_refresh_hours:
+    name: Refresh that summary every
+    description: >-
+      How many hours between refreshes of the summary above. Your system changes
+      - you add devices, rename rooms, remove integrations - and a summary
+      written once when the add-on started slowly stops matching reality. Set to
+      0 to only write it at start-up.
+
+  notify_on_completion:
+    name: Tell me when Claude finishes
+    description: >-
+      Sends a Home Assistant notification when Claude finishes a long task or
+      stops to ask you something, so you can start a job from your phone, put it
+      down, and be told when it needs you. The notification includes what Claude
+      said.
+
+  notify_after_seconds:
+    name: Only notify after
+    description: >-
+      Seconds. Short answers do not notify - only tasks that took at least this
+      long, on the basis that you were still watching the quick ones. Lower this
+      if you want to hear about everything; raise it if the notifications are
+      too chatty.
+
+  notify_tts_target:
+    name: Also speak notifications on
+    description: >-
+      A media player entity, for example media_player.kitchen_speaker. Leave
+      empty to keep notifications silent. When set, the same notifications are
+      also read out loud.
+
+  enable_ha_entities:
+    name: Show Claude Terminal in Home Assistant
+    description: >-
+      Publishes this add-on's own state as entities - whether Claude is busy,
+      when it last ran, how that went, and whether it needs you to sign in - so
+      you can put them on a dashboard or trigger automations from them. Note
+      Home Assistant forgets these when it restarts; the add-on republishes them
+      within a few minutes.
+
   enable_ha_mcp:
     name: Let Claude control Home Assistant
     description: >-

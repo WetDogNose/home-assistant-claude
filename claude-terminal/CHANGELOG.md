@@ -1,5 +1,205 @@
 # Changelog
 
+## 2.5.1-wdn.18
+
+The add-on could always be *told* to do things. This release is about it being
+able to tell you what it did — and about the scheduled and automated paths
+finally behaving the same way the terminal does.
+
+### 🔔 Home Assistant notifications when Claude finishes, or needs you
+
+The terminal is most useful from a phone, and a phone is the device you put
+down. Until now a task you started was invisible the moment you closed the tab:
+whether Claude had finished, failed, or spent forty minutes waiting for you to
+approve one file write was something you could only discover by going back and
+looking.
+
+Claude Code fires hooks at exactly those moments, and this add-on already knew
+how to raise a notification and speak on a media player. Nothing connected the
+two. Now:
+
+- **A finished response notifies you**, with what Claude actually said, read out
+  of the session transcript. Only for responses that took at least
+  `notify_after_seconds` (default 60) — every prompt fires this hook, and
+  notifying for all of them fills the drawer within a day.
+- **Claude waiting on you notifies you** — a permission prompt, or a question.
+- **Set `notify_tts_target`** and the same notifications are spoken on a speaker.
+
+`claude-hooks status` shows what is wired and why; `claude-hooks test` sends one
+down the same path.
+
+The hooks are rewritten into `~/.claude/settings.json` on every start, the same
+shipped-state discipline the bundled skills use — so changing an option takes
+effect on restart, and a hook a previous release installed is withdrawn rather
+than accumulating in a `$HOME` that persists forever. **Hooks you wrote yourself
+in that file are never touched**, and a `settings.json` that is not valid JSON is
+left completely alone rather than replaced while you were mid-edit.
+
+### 🏠 The add-on is now visible in Home Assistant
+
+Every Home-Assistant-facing script in this add-on read from Home Assistant.
+Nothing wrote back, so the add-on was invisible to the system it runs inside:
+automations could call Claude but could not react to it, and no dashboard could
+show it at all.
+
+| Entity | Tells you |
+|---|---|
+| `binary_sensor.claude_terminal_busy` | Claude is working right now |
+| `binary_sensor.claude_terminal_login_required` | Claude Code needs a sign-in |
+| `sensor.claude_terminal_status` | `idle`, `running` or `waiting` |
+| `sensor.claude_terminal_last_run` | When the last prompt finished |
+| `sensor.claude_terminal_last_result` | `ok` or `error`, error text as an attribute |
+| `sensor.claude_terminal_version` | The running add-on version |
+| `sensor.claude_terminal_tokens_today` | From `claude-usage --publish` |
+
+These are republished every five minutes, and that is not a nicety: states
+created through Home Assistant's REST API are runtime state which Core does not
+persist, so a one-shot publish would work perfectly until the first Home
+Assistant restart and then silently stop forever — with the automations built on
+them failing quietly. The heartbeat is what makes them durable.
+
+### ⚡ Automation API: async jobs, and conversations that remember
+
+**Home Assistant's `rest_command` gives up after 10 seconds by default.** Almost
+no prompt worth automating finishes in ten seconds, so the synchronous API
+silently failed for most real automations while working fine in testing with
+something trivial. That was the single biggest thing wrong with it.
+
+- **`"async": true`** answers `202` immediately with a job id, then fires the
+  Home Assistant event **`claude_terminal_job_finished`** when the prompt
+  completes — carrying the answer, the duration, and whether it succeeded.
+  Trigger a second automation on that event and "ask Claude something slow, then
+  act on the answer" becomes ordinary Home Assistant plumbing.
+- **`GET /api/jobs` and `/api/jobs/<id>`** read jobs back, authenticated, on
+  their own rate-limit budget (120/min) so polling a long job cannot exhaust
+  your ability to start one.
+- **`"session": "<name>"`** holds a conversation across calls. Every call used to
+  be a cold start with no memory of the last one, so an automation could ask a
+  question but never follow up. If the underlying Claude session has been pruned,
+  the next call transparently starts a fresh one instead of failing.
+
+### 🗣️ Three more blueprints, including one you talk to
+
+- **Ask Claude with your voice** — an Assist sentence trigger ("ask claude …")
+  sends your question and speaks the answer back through your voice assistant.
+- **Scheduled Claude report** — runs a prompt at a time you choose,
+  asynchronously, without blocking.
+- **Act on a finished Claude job** — triggers on `claude_terminal_job_finished`
+  and delivers the result by notification, `notify.*` service, or speech.
+
+The `rest_command` you declare in `configuration.yaml` gained optional `session`
+and `run_async` handling; the older short form still works, but the new
+blueprints need the new one. It is in DOCS.md.
+
+`install_blueprint` previously named a single file, so blueprints added to the
+image would have shipped nowhere. It now installs every bundled blueprint, with
+the same install-once-then-leave-alone rule per file, and migrates the old
+single baseline so an edited blueprint is not overwritten on upgrade.
+
+### ⏰ claude-cron: real schedules, and a bug that made it lie
+
+Scheduled jobs used to run a bare `claude -p`, ignoring
+`dangerously_skip_permissions` and `claude_extra_args` while the Automation API
+applied both. **The same prompt would therefore do its job through an automation
+and quietly refuse to touch anything on a schedule** — and a scheduled job, with
+nobody there to approve anything, is the case that needs those flags most. Fixed;
+`claude-cron add` now warns when you add a job that will hit this.
+
+Schedules are no longer interval-only:
+
+| Form | Meaning |
+|---|---|
+| `30` | Every 30 minutes (the original format, still accepted) |
+| `every 30m` / `every 6h` / `every 2d` | Every N minutes, hours, days |
+| `daily 03:15` | At that time, daily |
+| `0 3 * * *` | Five-field cron |
+| `*/15 8-22 * * 1-5` | Every 15 minutes, 8am–10pm, weekdays |
+
+Cron fields support `*`, `*/n`, `a-b`, `a-b/n` and lists, and reproduce real
+cron's day-of-month/day-of-week OR rule. Named months and weekdays are rejected
+when you add the job rather than accepted and then never matching. New
+subcommands: `enable`, `disable`, `run` (now, in the foreground), `log`, and
+`output`. Jobs from before this release keep working untouched.
+
+Two further defects fixed along the way:
+
+- **Concurrent writes lost jobs.** The daemon and the CLI wrote the same file
+  with no lock, so adding a job from the terminal while a job was running
+  discarded the new job with no error anywhere. All writes now go through a
+  locked, atomic read-modify-write.
+- **A paused job still ran.** `jq`'s `//` returns its right-hand side for `false`
+  as well as for `null`, so `.enabled // true` read a disabled job back as
+  enabled. `claude-cron disable` did nothing but change the label.
+
+### 🧑‍💻 Several sessions at once, and what it is costing
+
+- **`claude-session`** runs more than one Claude side by side —
+  `new`, `list`, `switch`, `kill`. Sessions survive closing the browser tab; the
+  `claude` session the browser attaches to is guarded against being killed by
+  accident.
+- **`claude-usage`** reports token usage from Claude Code's own transcripts, by
+  day, with `--json` and `--publish`. Cache reads are reported separately from
+  fresh input, because they are the cheap half of a long session and folding
+  them together makes a well-cached day look far more expensive than it was.
+  A cost is shown only where Claude Code recorded one — no price table is
+  applied here, because a hardcoded rate would go stale silently and be believed
+  anyway.
+
+### ⌨️ Key bar: slash, pipe, and paste
+
+`/` starts every Claude Code command and sits behind a modifier layer on iOS;
+`|` is absent from some software keyboards entirely. Both are now on the bar,
+along with a clipboard paste button — which appears only where the browser will
+actually allow reading the clipboard (that needs `https`), rather than being
+shown and failing on tap over plain `http`.
+
+Unlike the cursor keys, these do not go through the synthetic-keydown path. That
+path exists because an arrow's bytes depend on the terminal's mode; a printable
+character has one encoding in every mode, so it is written directly.
+
+### 📄 Claude knows more about your house, for longer
+
+- **`ha_context_refresh_hours`** (default 24) rewrites the Home Assistant summary
+  periodically. It was written once per boot, and a Home Assistant instance
+  routinely stays up for months — so Claude's picture of the house aged the whole
+  time, listing devices that had gone and missing everything added since.
+- **The generated `~/.claude/CLAUDE.md` now carries working-style guidance**:
+  fan out subagents for genuinely parallel work, and review changes
+  adversarially — including what a config change does with an `unavailable`
+  entity or a template that raises — before calling them done.
+
+### 🐛 Options were being lost when the Supervisor API stuttered
+
+`bashio::config key default` does not return the default when the Supervisor
+API call fails — it logs an error and returns an **empty string**. Several
+options were tested with `= "true"` and so quietly took their else branch:
+
+- **`auto_launch_claude`** dropped you into a plain shell instead of Claude.
+- **`automation_api_port`** was passed to the API daemon as `--port ''`, which
+  made it exit immediately — so the Automation API did not start at all. This
+  was visible in the add-on log the whole time as
+  `claude-api-server: error: argument --port: invalid int value: ''`.
+
+Both now read through a guard that treats an empty or `null` answer as "could
+not read it" and substitutes the real default. `require_ingress_user` is
+deliberately excluded and continues to fail **closed** — an unreadable config
+there means enforce, not fall back — and a test now pins that distinction so a
+future tidy-up cannot collapse the two.
+
+### 🔒 A one-time note about who can open this terminal
+
+`require_ingress_user` defaults to off because turning it on breaks the terminal
+outright on installations whose ingress sessions carry no user identity. That
+makes it a bad default but a genuinely valuable option, and an option nobody
+knows about protects nobody — so the add-on now says so once, in the
+notification drawer, and never again.
+
+This is an advisory, not a detection. Whether the Supervisor forwards the
+identity header is not observable from inside the container: `ttyd` does not
+expose the headers of the requests it serves, and nothing else in the add-on is
+in the request path. Rather than pretend to detect it, the notice explains the
+trade and how to test it safely.
+
 ## 2.5.1-wdn.17
 
 ### ⌨️ Cursor keys (and Esc, Tab, Ctrl) on phones and tablets

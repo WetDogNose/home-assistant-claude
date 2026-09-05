@@ -42,6 +42,11 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `dangerously_skip_permissions` | `false` | Launch Claude with `--dangerously-skip-permissions` (no confirmation prompts). **Read the security note below.** |
 | `claude_extra_args` | `""` | Extra flags appended to every Claude launch, e.g. `--model claude-sonnet-5`. Values are split on spaces; quoted multi-word arguments are not supported. |
 | `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
+| `ha_context_refresh_hours` | `24` | How often to rewrite that summary. Your system changes and a summary written once at startup slowly stops matching it. `0` writes it at startup only. |
+| `notify_on_completion` | `true` | Raise a Home Assistant notification when Claude finishes a long task or stops to ask you something — so you can start a job from your phone, put it down, and be told when it needs you. |
+| `notify_after_seconds` | `60` | Only notify for responses that took at least this long. Every prompt fires the completion hook, so notifying for all of them fills the drawer within a day. |
+| `notify_tts_target` | `""` | A `media_player` entity to speak notifications on as well as showing them. Empty keeps them silent. |
+| `enable_ha_entities` | `true` | Publish the add-on's own state (busy, last run, sign-in needed) as Home Assistant entities, so dashboards and automations can see Claude rather than only call it. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
 | `ha_mcp_version` | `"8.3.0"` | ha-mcp release to run. |
 | `enable_automation_api` | `true` | Enable the HTTP Automation API daemon (port 8128) to trigger Claude non-interactively from HA automations. |
@@ -72,7 +77,11 @@ ha-scaffold     # generate boilerplate for custom integration (<domain>) or PySc
 ha-git-backups  # git config time-machine backup and rollback (status|commit|rollback)
 ha-assist       # query HA Assist voice conversation pipeline (<prompt>)
 claude-bot      # remote messaging gateway for Telegram, Matrix, Discord (forward <prompt>)
-claude-cron     # manage autonomous background scheduled prompts (add|list|remove)
+claude-cron     # scheduled prompts (add|list|enable|disable|run|log|output), cron or "daily 07:00"
+claude-session  # run several Claude sessions at once (new|list|switch|kill)
+claude-usage    # token usage from Claude Code's own session transcripts
+claude-hooks    # Home Assistant notifications for Claude events (status|test|install)
+ha-entity       # publish the add-on's state as HA entities (set|sync|show|publish)
 esphome-setup   # install & persist ESPHome CLI toolchain
 ha-tts          # send text-to-speech announcement to HA media player
 claude-doctor   # diagnose network, auth, and environment issues
@@ -101,6 +110,8 @@ In practice that means you can ask for the outcome instead of the command: "why 
 | `ha-announce` | `ha-tts`, `ha-notify`, `ha-assist` |
 | `claude-automation-api` | The Automation API, the shipped blueprint, `claude-bot` |
 | `claude-scheduled-tasks` | `claude-cron` |
+| `claude-terminal-notifications` | `claude-hooks`, `ha-entity`, telling you what Claude is doing |
+| `claude-terminal-sessions` | `claude-session`, `claude-usage` |
 
 The shipped set is refreshed on every add-on start, so updates take effect and withdrawn skills are removed. Skills you write yourself in `~/.claude/skills/` are left untouched — including one that happens to share a name with a bundled skill, which wins and is kept.
 
@@ -112,7 +123,12 @@ The shipped set is refreshed on every add-on start, so updates take effect and w
 - **Pasting**: Use `Ctrl+Shift+V` (or `Cmd+V` / right-click, depending on browser).
 - **Phones & tablets — the key bar**: touch devices get a row of keys along the
   bottom of the terminal, because software keyboards have none of them: `esc`,
-  `tab`, `⇧tab`, `ctrl` and the four cursor keys. They are what Claude Code is
+  `tab`, `⇧tab`, `ctrl`, the four cursor keys, `/`, `|` and a clipboard paste
+  button. `/` starts every Claude Code command and is buried behind a modifier
+  layer on iOS; `|` is missing from some software keyboards entirely. The paste
+  button only appears where the browser will allow reading the clipboard, which
+  needs an `https` connection — over plain `http` on a LAN it is hidden rather
+  than shown and failing on tap. They are what Claude Code is
   actually driven with — arrows move through its prompts and your input history,
   `esc` interrupts, `⇧tab` cycles the permission mode, and `ctrl` covers
   `Ctrl+C` and the tmux `Ctrl+B` prefix. Hold an arrow to repeat it. `ctrl` is
@@ -127,6 +143,149 @@ The terminal starts in `/config` (your Home Assistant configuration). Also mount
 
 - `/addon_configs` — configuration directories of your other add-ons
 - `/share` — the shared folder
+
+## Scheduled tasks
+
+`claude-cron` runs prompts on a schedule with nobody watching:
+
+```bash
+claude-cron add "daily 07:00" "Summarise yesterday's energy use and notify me"
+claude-cron add "0 */4 * * *" "Check every battery sensor and flag any under 20%"
+claude-cron add "every 30m"   "Check whether the garage door has been left open"
+claude-cron list
+claude-cron run 2        # run job 2 now, in the foreground
+claude-cron disable 2    # pause without deleting
+claude-cron log 2        # recent runs
+claude-cron output 2     # what it said last time
+```
+
+Schedules can be:
+
+| Form | Meaning |
+|---|---|
+| `30` | Every 30 minutes (the original format, still accepted) |
+| `every 30m` / `every 6h` / `every 2d` | Every N minutes, hours or days |
+| `daily 03:15` | At that time, every day |
+| `0 3 * * *` | Five-field cron: minute, hour, day, month, weekday |
+| `*/15 8-22 * * 1-5` | Every 15 minutes, 8am–10pm, weekdays |
+
+Cron fields support `*`, `*/n`, `a-b`, `a-b/n` and comma-separated lists. Named
+months and weekdays (`JAN`, `MON`) are **not** supported and are rejected when
+you add the job, rather than accepted and then never matching. Day-of-month and
+day-of-week follow real cron's rule: when both are restricted, either one
+matching fires the job.
+
+Cron and `daily` schedules use the add-on's local timezone. `every N` schedules
+count from the end of the last run, so they drift by however long the job takes
+— which is what you want for "check every so often" and not for "report at 7am".
+
+> **If a scheduled job appears to do nothing, this is almost always why.** Jobs
+> run with the same permission flags an interactive session gets. With
+> `dangerously_skip_permissions` off (the default), a job can read and report
+> but will refuse any change it would normally ask you to approve — and on a
+> schedule there is nobody to ask. `claude-cron add` prints a reminder when you
+> add a job in that state.
+
+## Being told what Claude is doing
+
+The terminal is most useful from a phone, and a phone is the device you put
+down. Previously a task you started was invisible the moment you closed the tab:
+you had to reopen the add-on to find out whether Claude had finished, failed, or
+been sitting waiting for permission the whole time.
+
+The add-on now installs **Claude Code hooks** that report those moments to Home
+Assistant. With `notify_on_completion` on (the default) you get a notification:
+
+- **when a response finishes** — including what Claude actually said, pulled
+  from the session transcript. Only for responses that took at least
+  `notify_after_seconds` (default 60), because every prompt fires this and
+  notifying for all of them would fill the drawer within a day.
+- **when Claude is waiting for you** — a permission prompt, or a question.
+
+Set `notify_tts_target` to a `media_player` entity and the same notifications
+are spoken.
+
+```bash
+claude-hooks status    # what is installed and how it is configured
+claude-hooks test      # send a test notification down the same path
+```
+
+The hooks live in `~/.claude/settings.json` and are rewritten on every start, so
+changing the options above takes effect on the next restart and a hook a
+previous release installed is withdrawn. **Hooks you have written yourself in
+that file are never touched** — only entries the add-on put there are managed.
+If the file is not valid JSON the add-on leaves it entirely alone rather than
+replacing what you were in the middle of writing.
+
+Automation API and scheduled runs deliberately do *not* fire these hooks; they
+report their own results, and without the suppression every automated prompt
+would notify you twice.
+
+## Claude Terminal as Home Assistant entities
+
+With `enable_ha_entities` on (the default), the add-on publishes its own state
+so you can put it on a dashboard or trigger automations from it:
+
+| Entity | Tells you |
+|---|---|
+| `binary_sensor.claude_terminal_busy` | Claude is working right now |
+| `binary_sensor.claude_terminal_login_required` | Claude Code needs you to sign in again |
+| `sensor.claude_terminal_status` | `idle`, `running` or `waiting` |
+| `sensor.claude_terminal_last_run` | When the last prompt finished |
+| `sensor.claude_terminal_last_result` | `ok` or `error`, with the error as an attribute |
+| `sensor.claude_terminal_version` | The running add-on version |
+| `sensor.claude_terminal_tokens_today` | Published by `claude-usage --publish` |
+
+> **These entities disappear when Home Assistant restarts.** That is not a bug
+> in the add-on: states created through Home Assistant's REST API are runtime
+> state and Core does not persist them. The add-on republishes them every five
+> minutes, so they come back on their own within a few minutes of a restart —
+> but an automation that triggers on one should tolerate it being briefly
+> missing.
+
+You can publish your own values too:
+
+```bash
+ha-entity set busy=true status=running     # update and publish
+ha-entity show                             # what the add-on currently thinks
+ha-entity publish sensor.my_thing "42" '{"friendly_name": "My thing"}'
+```
+
+## Running more than one thing at once
+
+`ttyd` attaches the browser to a single tmux session called `claude`, which is
+what makes reconnecting land you back where you were. It also means a long
+refactor blocks the quick question you wanted to ask while it ran.
+
+```bash
+claude-session new refactor    # start another Claude and switch to it
+claude-session list            # what is running
+claude-session switch claude   # back to the one the browser attaches to
+claude-session kill refactor
+```
+
+Sessions survive closing the browser tab. Reopening the add-on always returns
+you to `claude`; use `switch` to get back to the others. Killing `claude` itself
+would disconnect you and is refused without `--force`. Inside tmux, `Ctrl+B s`
+picks a session from a list and `Ctrl+B d` detaches.
+
+## What it is costing
+
+```bash
+claude-usage              # the last 7 days
+claude-usage --days 30
+claude-usage --json
+claude-usage --publish    # also publish sensor.claude_terminal_tokens_today
+```
+
+Figures come from the usage Claude Code records in its own session transcripts.
+Cache reads are reported **separately** from fresh input, because they are the
+cheap half of a long session and folding them together makes a well-cached day
+look far more expensive than it was.
+
+A cost column is shown only where Claude Code recorded a cost. The add-on does
+not apply a price table of its own — a hardcoded rate would go stale silently
+and be believed anyway.
 
 ## Home Assistant MCP Integration
 
@@ -145,8 +304,61 @@ The add-on includes a built-in Automation API daemon that lets Home Assistant au
 - **Token Authentication**: All requests require an `X-API-Key` or `Authorization: Bearer` header. On first boot, if `automation_api_key` is empty, a random 32-character secret token is generated in `/data/automation_api_token`.
 - **Container Network Isolation**: Port `8128` is not exposed to the physical LAN (`ports:` is omitted in `config.yaml`). It is accessible only internally over the Home Assistant `hassio` Docker bridge network.
 - **Client IP Whitelisting**: Only calls originating from internal container subnets (`172.16-31.x.x`, `10.x.x.x`, `127.0.0.1`) are accepted.
-- **Process Mutex & Rate Limiting**: Prompts are executed sequentially (max 1 active process) with a 10 requests/minute rate limit per IP. The limit is applied *before* authentication, so a wrong token cannot be retried indefinitely.
+- **Process Mutex & Rate Limiting**: Prompts are executed sequentially (max 1 active process) with a 10 requests/minute rate limit per IP. Reading job status has its own, larger budget (120/minute) so polling a long job cannot exhaust your ability to start one. The limit is applied *before* authentication, so a wrong token cannot be retried indefinitely.
 - **Command Injection Safety**: Prompts are passed directly via array arguments to `subprocess.run(..., shell=False)`.
+
+### Long prompts: use `async`
+
+Home Assistant's `rest_command` gives up after **10 seconds** unless you raise
+its `timeout`, and most prompts worth automating take longer than that. A plain
+synchronous call therefore fails for most real automations while appearing to
+work when you test it with something trivial.
+
+Post `"async": true` instead. The API answers `202` immediately:
+
+```json
+{"job_id": "a1b2c3d4e5f6", "status": "queued", "poll_url": "/api/jobs/a1b2c3d4e5f6",
+ "event": "claude_terminal_job_finished"}
+```
+
+and when the prompt finishes it fires the Home Assistant event
+**`claude_terminal_job_finished`**, with:
+
+| Field | Meaning |
+|---|---|
+| `job_id` | The id returned by the 202 |
+| `status` | `completed` or `failed` |
+| `success` | Boolean form of the same |
+| `session` | The named session, if you used one |
+| `duration_seconds` | How long the prompt took |
+| `response` | Claude's answer, truncated to 1000 characters |
+| `truncated` | `true` when it was cut |
+| `error` | Failure text, truncated to 500 characters |
+
+Trigger a second automation on that event and you have "ask Claude something
+slow, then act on the answer" without holding a connection open. The shipped
+**Act on a finished Claude job** blueprint does exactly this.
+
+`GET /api/jobs/<id>` (same `X-API-Key`) returns the full, untruncated result,
+and `GET /api/jobs` lists recent jobs. Jobs are kept **in memory**, capped at 50,
+and are lost when the add-on restarts — the fired event is the durable record,
+which is why acting on the event is preferred over polling.
+
+### Named sessions
+
+Every API call is otherwise a cold start with no memory of the last one, so an
+automation can ask Claude a question but never hold a conversation. Add a
+`session` key — up to 64 letters, digits, `-` or `_` — and calls sharing that
+name continue the same Claude session:
+
+```json
+{"prompt": "And what about yesterday?", "session": "energy", "async": true}
+```
+
+The first call creates the session; later ones resume it. If the underlying
+Claude session has been pruned (they do not live forever, and a `/data` restored
+from an older backup will not have it), the next call transparently starts a
+fresh one rather than failing.
 
 ### Getting Your API Token
 
@@ -198,10 +410,11 @@ The add-on installs a **Claude Terminal Task Trigger** blueprint into
 `/config/blueprints/automation/` (when that directory exists), so it shows up
 under **Settings → Automations & scenes → Blueprints**.
 
-It is installed **once**, not re-copied on every start. Delete it and it stays
-deleted; edit it and your edits survive restarts. A later add-on release
-updates the file only if you haven't changed it. If you removed it and want it
-back, delete `/data/.blueprint-baseline.yaml` and restart the add-on.
+Blueprints are installed **once**, not re-copied on every start. Delete one and
+it stays deleted; edit one and your edits survive restarts. A later add-on
+release updates a file only if you haven't changed it. If you removed one and
+want it back, delete its baseline copy from `/data/blueprint-baselines/` and
+restart the add-on.
 
 > **Choosing a trigger matters.** An automation built from this blueprint can
 > make Claude act on Home Assistant, and those actions produce state changes,
@@ -228,10 +441,33 @@ rest_command:
     headers:
       X-API-Key: "{{ token }}"
     content_type: "application/json"
-    payload: '{"prompt": {{ prompt | to_json }}}'
+    payload: >-
+      {"prompt": {{ prompt | to_json }}
+      {%- if session is defined and session %}, "session": {{ session | to_json }}{% endif %}
+      {%- if run_async is defined and run_async %}, "async": true{% endif %}}
+    timeout: 150
 ```
 
+The `session` and `run_async` parts are optional and are simply omitted when a
+blueprint does not pass them, so this one definition serves all four shipped
+blueprints. If you already have the shorter version from an earlier release it
+still works — but the scheduled-report and voice blueprints need this one.
+
 The blueprint's default URL is `http://claude_terminal_wdn:8128/api/prompt`.
+
+### The shipped blueprints
+
+Four blueprints are installed into `/config/blueprints/automation/`:
+
+| Blueprint | What it does |
+|---|---|
+| **Claude Terminal Task Trigger** | The original: any trigger you choose fires a prompt. |
+| **Ask Claude with your voice** | An Assist sentence trigger ("ask claude …") sends the question and speaks the answer back through your voice assistant. This is the one place a *synchronous* call is right, because the assistant is already waiting — keep these questions short. |
+| **Scheduled Claude report** | Runs a prompt at a time you pick, asynchronously, and does not wait. Pair it with the next one. |
+| **Act on a finished Claude job** | Triggers on `claude_terminal_job_finished` and delivers the result as a notification, a `notify.*` service call and/or speech. |
+
+Each is installed **once** and then left alone — see the note above about edits
+and deletions, which applies to all of them.
 Home Assistant Core runs in its own container, so the add-on has to be addressed
 by slug — `127.0.0.1` would point at Home Assistant itself. Change the port only
 if you changed the `automation_api_port` option.
@@ -291,6 +527,8 @@ Read this before signing in — it grants real access.
 
 **This add-on gives Claude a lot of power by design**: it runs as root in its container, has read/write access to `/config`, `/addon_configs`, and `/share`, and (with MCP enabled) can control devices and modify automations.
 
+**Any signed-in Home Assistant user can open this terminal** unless you set `require_ingress_user`. `panel_admin` only hides the sidebar entry; it is not access control. The option defaults to off because turning it on breaks the terminal outright on installations whose ingress sessions carry no user identity, and a hardening option that bricks the add-on for some users cannot be the default. The add-on raises a one-time notification explaining this. Whether your installation forwards the identity header cannot be detected from inside the container — the only way to find out is to turn the option on, restart, and see whether the terminal still connects.
+
 **`dangerously_skip_permissions` removes the last human checkpoint.** With it enabled, a misunderstanding — or a prompt injection in any file or web page Claude reads — can modify your HA configuration or actuate devices without asking you first. Leave it off unless you understand and accept that trade-off. A warning banner is printed in the add-on log whenever it is active.
 
 ## Troubleshooting
@@ -300,6 +538,11 @@ Read this before signing in — it grants real access.
 - **"Press Enter to Reconnect", or the panel loads but never connects**: you have `require_ingress_user: true` and your installation does not attach the user identity to the ingress WebSocket. Set it back to `false` and restart. This is why the option defaults to off.
 - **No key bar on a phone or tablet**: the bar is shown when the browser reports a touch-style pointer, so a device reporting a mouse (some Android tablets in desktop mode, or a browser with desktop-site forced) will not get it — turn desktop-site off and reload. If it is missing everywhere, including on a phone, the add-on log will carry `serving ttyd's stock client (no touch key bar)`; that means the image is built without it, and reinstalling or updating the add-on restores it.
 
+- **I never get completion notifications**: run `claude-hooks status`. The most common cause is `notify_after_seconds` (default 60) — short answers deliberately do not notify, so test with something that takes a minute, or lower the value. `claude-hooks test` sends one immediately down the same path. If the hooks are missing entirely, check the add-on log for `Could not install Claude Code hooks`, which means `~/.claude/settings.json` could not be written or is not valid JSON — the add-on refuses to overwrite a settings file it cannot parse.
+- **Two notifications for every scheduled job**: an older `~/.claude/settings.json` with hand-copied hooks in it. The add-on only manages entries whose command begins with `claude-hooks handle`; remove any duplicates you added yourself.
+- **The `claude_terminal_*` entities are missing**: they vanish whenever Home Assistant Core restarts, because states created through the REST API are not persisted by Core. The add-on republishes them every five minutes — wait, or restart the add-on to publish immediately. If they never appear, check `enable_ha_entities` is on and run `ha-entity sync` in the terminal to see the error.
+- **A scheduled job runs but changes nothing**: see the warning under Scheduled tasks — without `dangerously_skip_permissions` a job cannot approve its own actions. `claude-cron output <id>` shows what it actually said.
+- **An automation gets no response from the API**: if it calls the API synchronously, it is almost certainly Home Assistant's `rest_command` 10-second default timeout rather than anything in the add-on. Use `"async": true` and trigger on the `claude_terminal_job_finished` event instead.
 - **Terminal opens blank or closes instantly**: this means Claude Code could not start. The add-on now detects that at launch and drops you to a shell with an explanation instead of a blank screen, so run `claude-doctor` there — it reports each installed copy and whether it actually runs. The usual cause is an update pulling a build incompatible with this image; `rm -f ~/.local/bin/claude` and restart to fall back to the bundled copy, then set `claude_version` to a known-good `X.Y.Z` so the next update does not reintroduce it.
 - **Claude exits immediately or behaves oddly**: restart the add-on so the background auto-updater can fetch the latest Claude Code; check the add-on log for update messages.
 - **Diagnostics**: run `claude-doctor` in the terminal for connectivity, memory, and environment checks.

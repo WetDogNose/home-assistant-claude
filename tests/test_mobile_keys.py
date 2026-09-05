@@ -132,6 +132,33 @@ class TestMobileKeysScript(unittest.TestCase):
         for key_code in ("27", "9", "37", "38", "39", "40"):
             self.assertIn("keyCode: " + key_code, self.source)
 
+    def test_sends_the_characters_a_software_keyboard_buries(self):
+        """Slash starts every Claude Code command; pipe is missing outright from
+        some software keyboards."""
+        self.assertIn("char: '/'", self.source)
+        self.assertIn("char: '|'", self.source)
+
+    def test_characters_bypass_the_synthetic_key_path(self):
+        """A printable character has one encoding in every terminal mode.
+
+        The keyboard path exists for the cursor keys, whose bytes depend on
+        DECCKM; routing a plain character through it would mean xterm.js has to
+        reconstruct the character from a synthesised keypress for no benefit.
+        """
+        self.assertIn("if (spec.char)", self.source)
+
+    def test_paste_is_hidden_when_the_clipboard_is_unreachable(self):
+        """Home Assistant is commonly reached over plain http on a LAN, where
+        the clipboard API does not exist. A button that always fails on tap is
+        worse than no button."""
+        self.assertIn("clipboardAvailable", self.source)
+        self.assertIn("spec.paste && !clipboardAvailable()", self.source)
+
+    def test_paste_uses_bracketed_paste_when_available(self):
+        """Without bracketed paste a multi-line paste into Claude Code submits
+        at the first newline and the rest lands in whatever comes next."""
+        self.assertIn("term.paste", self.source)
+
     def test_positions_itself_against_the_visual_viewport(self):
         # position:fixed anchors to the layout viewport, which iOS does not
         # shrink for the keyboard -- so without this the bar hides behind it.

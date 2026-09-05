@@ -30,7 +30,9 @@ for s in /run.sh /opt/scripts/setup-ha-mcp.sh /opt/scripts/health-check.sh \
          /opt/scripts/ha-diagnose.sh /opt/scripts/ha-dashboard.sh \
          /opt/scripts/ha-mesh.sh /opt/scripts/ha-assist.sh \
          /opt/scripts/ha-memory.sh /opt/scripts/claude-bot.sh \
-         /opt/scripts/ha-git-backups.sh; do
+         /opt/scripts/ha-git-backups.sh /opt/scripts/ha-entity.sh \
+         /opt/scripts/claude-hooks.sh /opt/scripts/claude-usage.sh \
+         /opt/scripts/claude-session.sh; do
   if [ -x "$s" ]; then echo "OK: $s"; else echo "FAIL: $s not executable"; rc=1; fi
 done
 exit $rc
@@ -43,7 +45,7 @@ then rc=1; fi
 echo "== sourced libraries are present =="
 if ! run <<'IN'
 rc=0
-for l in /opt/scripts/login-url-lib.sh; do
+for l in /opt/scripts/login-url-lib.sh /opt/scripts/state-lib.sh; do
   if [ -f "$l" ]; then echo "OK: $l"; else echo "FAIL: $l missing"; rc=1; fi
 done
 exit $rc
@@ -59,7 +61,8 @@ if ! run <<'IN'
 rc=0
 for s in ha-config-safety ha-diagnostics ha-history ha-dashboards \
          ha-integration-dev ha-camera-vision ha-announce \
-         claude-automation-api claude-scheduled-tasks; do
+         claude-automation-api claude-scheduled-tasks \
+         claude-terminal-notifications claude-terminal-sessions; do
   f="/opt/skills/$s/SKILL.md"
   if [ ! -f "$f" ]; then echo "FAIL: $f missing"; rc=1; continue; fi
   # The frontmatter is the whole triggering mechanism: no name/description and
@@ -68,6 +71,27 @@ for s in ha-config-safety ha-diagnostics ha-history ha-dashboards \
   if ! grep -q "^name: ${s}$" "$f"; then echo "FAIL: $s name does not match its directory"; rc=1; continue; fi
   if ! grep -q '^description: .' "$f"; then echo "FAIL: $s has no description"; rc=1; continue; fi
   echo "OK: $s"
+done
+exit $rc
+IN
+then rc=1; fi
+
+# Blueprints are copied into /config the first time the add-on starts, and only
+# then -- so one missing from the image is not noticed at boot, it is noticed
+# when a user goes looking for an automation blueprint the release notes
+# promised and finds nothing there.
+echo "== blueprints are present =="
+if ! run <<'IN'
+rc=0
+for b in claude_automation_query claude_terminal_ask \
+         claude_terminal_scheduled_report claude_terminal_job_result; do
+  f="/opt/blueprints/$b.yaml"
+  if [ ! -f "$f" ]; then echo "FAIL: $f missing"; rc=1; continue; fi
+  # Every one of these can act on Home Assistant, and an automation built from
+  # a blueprint with no concurrency guard can pile runs on top of each other.
+  grep -qE '^(mode: single|mode: queued)$' "$f" || { echo "FAIL: $b declares no run mode"; rc=1; continue; }
+  grep -q '^max_exceeded: silent$' "$f" || { echo "FAIL: $b does not silence the drop"; rc=1; continue; }
+  echo "OK: $b"
 done
 exit $rc
 IN
