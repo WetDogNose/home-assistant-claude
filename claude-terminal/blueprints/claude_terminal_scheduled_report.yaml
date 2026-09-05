@@ -1,0 +1,283 @@
+blueprint:
+  name: Scheduled Claude report
+  description: >
+    Runs a Claude Code prompt on a schedule -- a morning energy summary, a
+    nightly "anything unusual today?", a weekly review of your automations --
+    and hands the answer off to be delivered when it is ready.
+
+
+    ## Why this one is asynchronous
+
+
+    A report prompt is not a lookup. Claude may read the state machine, walk
+    files under `/config`, and think for minutes before it has anything worth
+    saying. A synchronous call would hold this automation open for that whole
+    time and then time out anyway, leaving you with a failed run and no
+    report.
+
+
+    So the call is made with `"async": true`. The API answers `202` in
+    milliseconds with a job id and this automation is finished. When Claude is
+    done, the add-on fires the Home Assistant event
+    `claude_terminal_job_finished` carrying the answer.
+
+
+    **This blueprint does not deliver the report.** Pair it with *Act on a
+    finished Claude job*, which listens for that event and sends the
+    notification or speaks it. Set the same session name in both and point the
+    companion blueprint at the same session to keep reports separate from
+    anything else you have asked Claude.
+
+
+    The notify and TTS inputs here are for *dispatch failures only* -- the
+    add-on being down, a wrong token, the rate limit hit. A report that is
+    never started is otherwise silent, and silence looks exactly like a report
+    with nothing to say.
+
+
+    ## Choose the schedule with the trigger in mind
+
+
+    Claude runs with access to Home Assistant, so a run produces state
+    changes, logbook entries and log records of its own. A time trigger cannot
+    be fired by that output, which is why this blueprint takes a time rather
+    than a free-form trigger. Keep it that way: if you convert this to an
+    event trigger, do not point it at `system_log_event`, the error log, the
+    logbook or a bare `state_changed`, or a run will feed the next one.
+
+
+    ## Required setup
+
+
+    This blueprint calls a REST command, which Home Assistant only lets you
+    define in `configuration.yaml`. Add this once, then restart Home
+    Assistant. Without it the automation fails at runtime with an
+    unknown-service error:
+
+
+    ```yaml
+
+    rest_command:
+      claude_terminal_query:
+        url: "{{ url }}"
+        method: POST
+        headers:
+          X-API-Key: "{{ token }}"
+        content_type: "application/json"
+        payload: >-
+          {"prompt": {{ prompt | to_json }}
+          {%- if session is defined and session %}, "session": {{ session | to_json }}{% endif %}
+          {%- if run_async is defined and run_async %}, "async": true{% endif %}}
+        timeout: 150
+    ```
+
+
+    The API token is in `/data/automation_api_token` inside the add-on (run
+    `cat /data/automation_api_token` in the Claude Terminal), or whatever you
+    set as the `automation_api_key` option.
+  domain: automation
+  input:
+    report_time:
+      name: Time
+      description: When to start the report each day.
+      default: "07:00:00"
+      selector:
+        time:
+    weekdays:
+      name: Days
+      description: >
+        Days the report runs on. Leave all of them unselected to run every
+        day.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
+    report_prompt:
+      name: Report prompt
+      description: >
+        What you want Claude to produce. Be specific about the format you want
+        back -- the answer is delivered as a notification, and only the first
+        1000 characters survive the event that carries it.
+      selector:
+        text:
+          multiline: true
+    api_url:
+      name: Automation API URL
+      description: >
+        Endpoint URL of the Claude Terminal Automation API. Home Assistant
+        Core runs in its own container, so this must address the add-on by its
+        slug on the Docker network -- 127.0.0.1 would be Home Assistant
+        itself. Change the port only if you changed the
+        `automation_api_port` option.
+      default: "http://claude_terminal_wdn:8128/api/prompt"
+      selector:
+        text:
+    api_token:
+      name: API Token
+      description: Token from /data/automation_api_token in Claude Terminal.
+      selector:
+        text:
+          type: password
+    session:
+      name: Conversation session
+      description: >
+        Named conversation this report belongs to. Reuse it and Claude
+        remembers the previous reports; give each report its own name to keep
+        them independent. This is also what the companion result blueprint
+        filters on.
+      default: "report"
+      selector:
+        text:
+    notify_service:
+      name: Notify service for dispatch failures
+      description: >
+        Optional. Service name such as `notify.mobile_app_pixel`, told only
+        when the report could not be *started*. The report itself is delivered
+        by the companion blueprint, not here. Leave empty to skip.
+      default: ""
+      selector:
+        text:
+    tts_engine:
+      name: Text-to-speech entity
+      description: >
+        Optional. The `tts.` entity that does the speaking. Required for
+        speech: a media player is where a voice comes out, not what produces
+        it. Leave empty to skip speech.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: tts
+    tts_target:
+      name: Speaker
+      description: >
+        Optional. Media player that announces a dispatch failure. Needs the
+        text-to-speech entity above to be set as well.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+
+# Bound once so the weekday condition and the delivery steps read the same
+# values the user configured, rather than repeating !input at each use.
+variables:
+  active_weekdays: !input weekdays
+  notify_service: !input notify_service
+  tts_engine: !input tts_engine
+  tts_target: !input tts_target
+
+triggers:
+  - trigger: time
+    at: !input report_time
+
+conditions:
+  # A `condition: time` with an empty weekday list matches nothing, which
+  # would silently disable the automation for anyone who left the default
+  # alone. Templated so "none selected" means "every day".
+  - condition: template
+    value_template: >-
+      {{ active_weekdays | count == 0
+         or now().strftime('%a') | lower in active_weekdays }}
+
+# Overlapping runs are dropped rather than queued, and the drop is silent.
+#
+# The default max_exceeded is `warning`, which writes a log line every time a
+# run is skipped. On an automation whose action can cause further Home
+# Assistant activity, that log line is itself an event a badly chosen trigger
+# could fire on -- so the guard against pile-up would end up feeding the loop
+# it exists to prevent.
+#
+# Deliberately no template-based cooldown condition: a condition that can
+# raise (an unset last_triggered, a missing entity) logs an error on every
+# evaluation, which is the same hazard in a different costume. These two keys
+# are declarative and cannot fail.
+mode: single
+max_exceeded: silent
+
+actions:
+  # `run_async: true` is what puts "async": true in the payload. The API
+  # replies 202 with a job id straight away; Claude keeps working in the
+  # add-on and fires claude_terminal_job_finished when it is done. Nothing
+  # here waits for that.
+  #
+  # response_variable is still used, but only to see whether the *dispatch*
+  # was accepted -- it resolves as soon as the 202 arrives, so it costs no
+  # waiting.
+  - action: rest_command.claude_terminal_query
+    data:
+      url: !input api_url
+      token: !input api_token
+      session: !input session
+      run_async: true
+      prompt: !input report_prompt
+    response_variable: dispatch_result
+    continue_on_error: true
+
+  - variables:
+      dispatch_ok: >-
+        {{ dispatch_result is defined
+           and dispatch_result.status is defined
+           and dispatch_result.status in [200, 202] }}
+      failure_text: >-
+        Claude Terminal did not accept the scheduled report. HTTP status
+        {{ dispatch_result.status | default('none - no response') }}. Check
+        that the add-on is running and that the API token is current.
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ not dispatch_ok }}"
+        sequence:
+          # Always visible in the UI, needs no configuration, and cannot fail
+          # because a service name was typed wrong.
+          - action: persistent_notification.create
+            data:
+              title: Claude scheduled report failed to start
+              message: "{{ failure_text }}"
+              notification_id: >-
+                claude_terminal_report_dispatch
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_service | trim | length > 0 }}"
+                sequence:
+                  # Templated service name, so one text input covers every
+                  # notify platform. continue_on_error keeps a typo in that
+                  # name from swallowing the steps after it.
+                  - action: "{{ notify_service | trim }}"
+                    data:
+                      title: Claude scheduled report failed to start
+                      message: "{{ failure_text }}"
+                    continue_on_error: true
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ tts_engine | trim | length > 0
+                         and tts_target | trim | length > 0 }}
+                sequence:
+                  - action: tts.speak
+                    target:
+                      entity_id: "{{ tts_engine }}"
+                    data:
+                      media_player_entity_id: "{{ tts_target }}"
+                      message: "{{ failure_text }}"
+                    continue_on_error: true

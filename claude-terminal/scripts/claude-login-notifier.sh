@@ -32,6 +32,28 @@ NOTIFIED_FLAG="${STATE_DIR}/notification_active"
 
 mkdir -p "$STATE_DIR"
 
+# Mirror the sign-in state into binary_sensor.claude_terminal_login_required.
+#
+# The persistent notification below is the loud half of this and is the right
+# thing when a sign-in is first needed. The entity is the quiet half: it is
+# what an automation can act on ("tell me on my phone if Claude has been logged
+# out for an hour") and what a dashboard can show, neither of which a
+# notification supports. Best effort -- this daemon's actual job is the URL.
+publish_login_state() {
+    [ -x /usr/local/bin/ha-entity ] || return 0
+    /usr/local/bin/ha-entity set "login_required=$1" >/dev/null 2>&1 || true
+}
+
+# Only publish on a CHANGE. This loop wakes every 3 seconds, and a state POST
+# per tick would be 28,800 pointless writes a day into Home Assistant's
+# recorder.
+last_published=""
+publish_login_state_if_changed() {
+    [ "$1" = "$last_published" ] && return 0
+    last_published="$1"
+    publish_login_state "$1"
+}
+
 is_authenticated() {
     local config_dir="${ANTHROPIC_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/claude}"
     local cred
@@ -65,9 +87,12 @@ while true; do
     # If authenticated, clear any lingering sign-in notification and sleep longer
     if is_authenticated; then
         dismiss_notification
+        publish_login_state_if_changed false
         sleep 10
         continue
     fi
+
+    publish_login_state_if_changed true
 
     # Capture the sign-in URL from the tmux session. capture_login_url returns
     # non-zero unless it reassembled a whole URL, so a half-drawn frame or a

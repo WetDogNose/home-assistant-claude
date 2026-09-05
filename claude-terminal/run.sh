@@ -10,6 +10,28 @@
 set -e
 set -o pipefail
 
+# Read an add-on option, falling back to a default when bashio cannot answer.
+#
+# `bashio::config key default` is not enough on its own: when the Supervisor API
+# call fails -- which it does on every read outside a Supervisor, and can do
+# transiently inside one -- bashio logs an error and returns an EMPTY string
+# rather than the default. Callers that used the value directly then passed ""
+# onwards, which is how the Automation API came to be started with
+# `--port ''` and refuse to launch at all.
+#
+# Note this is for options where falling back is safe. require_ingress_user
+# deliberately does NOT use it: that one must fail CLOSED, and has its own
+# inline handling that treats anything but an explicit "false" as enabled.
+config_or() {
+    local key="$1" default="$2" value
+    value=$(bashio::config "$key" "$default" 2>/dev/null) || value=""
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        printf '%s' "$default"
+    else
+        printf '%s' "$value"
+    fi
+}
+
 # Initialize environment for Claude Code CLI using /data (HA best practice)
 init_environment() {
     # Use /data exclusively - guaranteed writable by HA Supervisor
@@ -146,7 +168,11 @@ setup_commands() {
         "ha-assist:/opt/scripts/ha-assist.sh" \
         "ha-memory:/opt/scripts/ha-memory.sh" \
         "claude-bot:/opt/scripts/claude-bot.sh" \
-        "ha-git-backups:/opt/scripts/ha-git-backups.sh"; do
+        "ha-git-backups:/opt/scripts/ha-git-backups.sh" \
+        "ha-entity:/opt/scripts/ha-entity.sh" \
+        "claude-hooks:/opt/scripts/claude-hooks.sh" \
+        "claude-usage:/opt/scripts/claude-usage.sh" \
+        "claude-session:/opt/scripts/claude-session.sh"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -156,6 +182,11 @@ setup_commands() {
             bashio::log.warning "Script not found: $script"
         fi
     done
+
+    # state-lib.sh is deliberately absent from the list above: it is sourced,
+    # not executed, so installing it as a command would put a file in
+    # /usr/local/bin that does nothing when run. The scripts that need it look
+    # for it in /opt/scripts, which is why they keep working from a copy.
 
     # Write add-on version for the welcome banner (no bashio inside ttyd)
     bashio::addon.version > /opt/scripts/addon-version 2>/dev/null \
@@ -213,6 +244,152 @@ install_skills() {
     done
 
     bashio::log.info "Installed ${count} Claude Code skills into ${dest}"
+}
+
+# Install the Claude Code hooks that tell Home Assistant what Claude is doing.
+#
+# Same shipped-state discipline as install_skills, and for the same reason:
+# $HOME is /data, so anything written into settings.json once would outlive the
+# release that put it there. claude-hooks re-derives the whole managed block on
+# every boot -- withdrawing a hook a previous version installed, and picking up
+# a change to notify_on_completion or enable_ha_entities without the user having
+# to touch the file.
+#
+# Only entries whose command starts with "claude-hooks handle" are touched, so a
+# user's own hooks in the same settings.json are never disturbed.
+install_hooks() {
+    [ -x /usr/local/bin/claude-hooks ] || return 0
+
+    if claude-hooks install; then
+        bashio::log.info "Claude Code hooks installed (notifications: $(config_or 'notify_on_completion' 'true'))"
+    else
+        # Non-fatal on purpose: a settings.json the user has broken, or made
+        # read-only, must cost them notifications and nothing else.
+        bashio::log.warning "Could not install Claude Code hooks; continuing without them"
+    fi
+}
+
+# Publish the add-on's own state to Home Assistant, and keep republishing it.
+#
+# States created through the Core REST API are runtime-only: Home Assistant does
+# not persist them, so every one of these entities disappears the moment Core
+# restarts and never comes back on its own. A one-shot publish at boot would
+# therefore work perfectly until the first Home Assistant restart and then
+# silently stop -- which is worse than not shipping the entities at all, because
+# the automations built on them would fail quietly.
+#
+# The heartbeat is what makes them durable. It is also the cheapest possible
+# liveness signal: six state POSTs every five minutes.
+start_entity_heartbeat() {
+    local enabled
+    enabled=$(config_or 'enable_ha_entities' 'true')
+
+    if [ "$enabled" = "false" ]; then
+        bashio::log.info "Home Assistant entity publishing is disabled in options."
+        return 0
+    fi
+
+    [ -x /usr/local/bin/ha-entity ] || return 0
+
+    # ha-entity needs SUPERVISOR_TOKEN and exits immediately without one, so
+    # claiming to have started a heartbeat that died on its first line would be
+    # a log that lies. In a real add-on the token is always present; this branch
+    # is what local runs and `ci/boot-test.sh` take.
+    if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
+        bashio::log.info "No Supervisor token; not publishing Home Assistant entities"
+        return 0
+    fi
+
+    bashio::log.info "Publishing Home Assistant entities (heartbeat every 5 minutes)"
+
+    # EVERYTHING here is inside the subshell, the seed write included.
+    #
+    # That seed is a state write followed by a publish of all six entities, and
+    # a publish is HTTP to the Supervisor. Run in the foreground it put up to a
+    # curl timeout of network on the boot path -- in the worst window there is,
+    # because add-ons start while Core is still coming up and is at its
+    # slowest. This file's own rule is that nothing on the boot path may hit the
+    # network; the seed is not an exception to it.
+    (
+        ha-entity set \
+            "version=$(cat /opt/scripts/addon-version 2>/dev/null || echo unknown)" \
+            busy=false status=idle >/dev/null 2>&1 || true
+        ha-entity heartbeat >/dev/null 2>&1 || true
+    ) &
+}
+
+# Refresh the Home Assistant context file on a schedule.
+#
+# generate_ha_context runs once per boot, which is fine for a box that is
+# restarted often and wrong for one that is not: a Home Assistant instance
+# routinely stays up for months, and Claude's picture of the house silently
+# ages the whole time -- new devices missing, renamed areas wrong, removed
+# integrations still listed. The context is only useful while it is true.
+start_context_refresh() {
+    if [ "$(config_or 'ha_smart_context' 'true')" != "true" ]; then
+        return 0
+    fi
+
+    local hours
+    hours=$(config_or 'ha_context_refresh_hours' '24')
+    case "$hours" in
+        ''|*[!0-9]*) hours="24" ;;
+    esac
+
+    if [ "$hours" -eq 0 ]; then
+        bashio::log.info "Periodic HA context refresh is off (ha_context_refresh_hours: 0)"
+        return 0
+    fi
+
+    [ -x /usr/local/bin/ha-context ] || return 0
+
+    bashio::log.info "Home Assistant context will refresh every ${hours}h"
+    (
+        while true; do
+            sleep $((hours * 3600))
+            /usr/local/bin/ha-context >/dev/null 2>&1 || true
+        done
+    ) &
+}
+
+# Say once, and only once, that the terminal is reachable by every Home
+# Assistant user.
+#
+# require_ingress_user defaults to false because turning it on breaks the
+# terminal outright on installations whose ingress sessions carry no user
+# identity -- "Press Enter to Reconnect", forever, with nothing explaining why.
+# That makes it a bad default but a genuinely valuable option, and an option
+# nobody knows about protects nobody.
+#
+# This is an ADVISORY, not a detection. Whether the Supervisor forwards the
+# identity header is not observable from inside the container: ttyd does not
+# expose the headers of the requests it serves, and nothing else here is in the
+# request path. So rather than pretend to detect it, this says what the trade is
+# and how to test it safely, once, and then never again.
+notify_ingress_advisory() {
+    local sentinel="/data/.ingress-advisory-sent"
+    local require_user
+
+    [ -f "$sentinel" ] && return 0
+    [ -n "${SUPERVISOR_TOKEN:-}" ] || return 0
+
+    # Defaults to "true" on an unreadable config so a failed read cannot
+    # produce a notification claiming the terminal is open when it is not.
+    require_user=$(config_or 'require_ingress_user' 'true')
+    [ "$require_user" = "false" ] || return 0
+
+    # Backgrounded for the same reason as the entity seed above: ha-notify is a
+    # curl at the Supervisor with a 10s timeout, and this runs before ttyd.
+    ( /usr/local/bin/ha-notify \
+        "Claude Terminal is open to every Home Assistant user" \
+        "This terminal is a root shell with write access to /config. By default any signed-in Home Assistant user can open it, because restricting it breaks the terminal on installations that do not pass user identity through to add-ons.
+
+To restrict it: set the 'Require a Home Assistant sign-in' option and restart the add-on. If the terminal then shows 'Press Enter to Reconnect', your installation does not forward the identity header — turn it back off.
+
+This notice is shown once." \
+        "claude_terminal_ingress_advisory" || true ) &
+
+    touch "$sentinel" 2>/dev/null || true
 }
 
 # Keep Claude Code current. The bundled copy in the image is frozen at build
@@ -519,7 +696,13 @@ build_claude_flags() {
 get_claude_launch_command() {
     local flags="$1"
 
-    if [ "$(bashio::config 'auto_launch_claude' 'true')" = "true" ]; then
+    # config_or, not bashio::config directly: bashio returns an EMPTY string
+    # rather than the default when the Supervisor API call fails, and "" is not
+    # "true", so a transient API hiccup silently dropped the user into shell
+    # mode instead of Claude. This option fails OPEN on an unreadable config --
+    # the opposite of require_ingress_user below, which must fail closed. Do not
+    # collapse the two patterns together.
+    if [ "$(config_or 'auto_launch_claude' 'true')" = "true" ]; then
         # tmux -A attaches to the live session on browser reconnects and HA
         # navigation instead of stacking new ones.
         # claude-launch rather than claude: ttyd resolves this command on every
@@ -581,7 +764,7 @@ start_web_terminal() {
     local launch_command
     launch_command=$(get_claude_launch_command "$flags")
 
-    bashio::log.info "Starting web terminal on port ${port} (auto_launch_claude=$(bashio::config 'auto_launch_claude' 'true'))"
+    bashio::log.info "Starting web terminal on port ${port} (auto_launch_claude=$(config_or 'auto_launch_claude' 'true'))"
 
     # Terminal theme - dark palette with terracotta accents (#d97757)
     local ttyd_theme='{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#d97757","cursorAccent":"#1a1b26","selectionBackground":"#33467c","selectionForeground":"#c0caf5","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
@@ -669,16 +852,20 @@ setup_ha_mcp() {
 # Start Automation API server for Home Assistant automations
 start_automation_api() {
     local enabled port custom_key token_file="/data/automation_api_token"
-    enabled=$(bashio::config 'enable_automation_api' 'true' 2>/dev/null) || enabled="true"
-    [ -z "$enabled" ] || [ "$enabled" = "null" ] && enabled="true"
+    enabled=$(config_or 'enable_automation_api' 'true')
 
     if [ "$enabled" = "false" ]; then
         bashio::log.info "Automation API server is disabled in options."
         return 0
     fi
 
-    port=$(bashio::config 'automation_api_port' '8128' 2>/dev/null) || port="8128"
-    custom_key=$(bashio::config 'automation_api_key' '' 2>/dev/null) || custom_key=""
+    port=$(config_or 'automation_api_port' '8128')
+    # Belt and braces: a non-numeric port would make the daemon exit the same
+    # way an empty one did.
+    case "$port" in
+        ''|*[!0-9]*) port="8128" ;;
+    esac
+    custom_key=$(config_or 'automation_api_key' '')
 
     if [ -n "$custom_key" ] && [ "$custom_key" != "null" ]; then
         echo "$custom_key" > "$token_file"
@@ -716,7 +903,8 @@ start_claude_cron() {
     fi
 }
 
-# Install the automation blueprint into the user's Home Assistant config.
+# Install the bundled automation blueprints into the user's Home Assistant
+# config.
 #
 # This used to `cp` over the destination on EVERY start, which is wrong in
 # three separate ways: a user who deleted the blueprint got it back at the next
@@ -724,29 +912,52 @@ start_claude_cron() {
 # silently reverted, and the file reappeared as untracked churn in any git
 # repository kept over /config (which `ha-git-backups` encourages).
 #
-# It is now installed once and then left alone. A baseline copy of exactly what
-# was installed lets a later release update a file nobody has touched while
-# leaving an edited one intact — and a destination that is missing while the
-# baseline exists means the user removed it deliberately, so it is not
-# recreated.
+# Each blueprint is now installed once and then left alone. A baseline copy of
+# exactly what was installed lets a later release update a file nobody has
+# touched while leaving an edited one intact - and a destination that is
+# missing while the baseline exists means the user removed it deliberately, so
+# it is not recreated.
 #
-# The path is deliberately NOT moved into a vendor subdirectory. Automations
-# reference a blueprint by its path, so relocating it would break every
+# The paths are deliberately NOT moved into a vendor subdirectory. Automations
+# reference a blueprint by its path, so relocating one would break every
 # automation already built from it.
-install_blueprint() {
-    local src="/opt/blueprints/claude_automation_query.yaml"
-    local dest="/config/blueprints/automation/claude_automation_query.yaml"
-    local baseline="/data/.blueprint-baseline.yaml"
+BLUEPRINT_BASELINE_DIR="/data/blueprint-baselines"
 
-    [ -f "$src" ] || return 0
-    [ -d "/config/blueprints/automation" ] || return 0
+# The 2.5.1-wdn.17 and earlier layout kept a single baseline, at a fixed path,
+# for the only blueprint that existed then. Moving it into the per-file
+# directory is not cosmetic: without it that blueprint looks like it has no
+# baseline at all, which this function reads as "pre-baseline install, safe to
+# overwrite" - and it would overwrite exactly the local edits the baseline
+# mechanism exists to protect.
+migrate_blueprint_baseline() {
+    local legacy="/data/.blueprint-baseline.yaml"
+    local moved="${BLUEPRINT_BASELINE_DIR}/claude_automation_query.yaml"
 
-    local action="install"
+    [ -f "$legacy" ] || return 0
+    [ -f "$moved" ] && { rm -f "$legacy"; return 0; }
+
+    if mkdir -p "$BLUEPRINT_BASELINE_DIR" 2>/dev/null && mv "$legacy" "$moved" 2>/dev/null; then
+        bashio::log.info "Migrated the blueprint baseline to ${BLUEPRINT_BASELINE_DIR}"
+    else
+        bashio::log.warning "Could not migrate the legacy blueprint baseline; leaving it in place"
+    fi
+}
+
+install_one_blueprint() {
+    local src="$1"
+    local name dest baseline action
+
+    name=$(basename "$src")
+    dest="/config/blueprints/automation/${name}"
+    baseline="${BLUEPRINT_BASELINE_DIR}/${name}"
+
+    action="install"
     if [ -f "$dest" ]; then
         if [ ! -f "$baseline" ]; then
-            # Upgrading from a version that re-copied on every boot, so whatever
-            # is on disk IS the shipped content — overwriting cannot lose an
-            # edit that could have survived the previous behaviour.
+            # Either a pre-baseline install (whatever is on disk IS the shipped
+            # content, because that version re-copied on every boot) or a file
+            # the user put there themselves under one of our names. Overwriting
+            # cannot lose an edit that could have survived the old behaviour.
             action="update"
         elif cmp -s "$dest" "$baseline"; then
             action="update"
@@ -759,20 +970,37 @@ install_blueprint() {
 
     case "$action" in
         keep-edited)
-            bashio::log.info "Automation blueprint has local edits; leaving ${dest} untouched"
+            bashio::log.info "Blueprint ${name} has local edits; leaving it untouched"
             return 0
             ;;
         keep-deleted)
-            bashio::log.info "Automation blueprint was removed; not reinstalling it (delete ${baseline} to get it back)"
+            bashio::log.info "Blueprint ${name} was removed; not reinstalling it (delete ${baseline} to get it back)"
             return 0
             ;;
     esac
 
     if cp "$src" "$dest" 2>/dev/null && cp "$src" "$baseline" 2>/dev/null; then
-        bashio::log.info "Automation blueprint ${action} complete: ${dest}"
+        bashio::log.info "Blueprint ${name} ${action} complete"
     else
-        bashio::log.warning "Could not write the automation blueprint to ${dest}"
+        bashio::log.warning "Could not write the blueprint to ${dest}"
     fi
+}
+
+install_blueprint() {
+    [ -d "/opt/blueprints" ] || return 0
+    [ -d "/config/blueprints/automation" ] || return 0
+
+    mkdir -p "$BLUEPRINT_BASELINE_DIR" 2>/dev/null || return 0
+    migrate_blueprint_baseline
+
+    local src count=0
+    for src in /opt/blueprints/*.yaml; do
+        [ -f "$src" ] || continue
+        install_one_blueprint "$src"
+        count=$((count + 1))
+    done
+
+    bashio::log.info "Checked ${count} bundled blueprint(s)"
 }
 
 # Main execution
@@ -782,11 +1010,15 @@ main() {
     init_environment
     setup_commands
     install_skills
+    install_hooks
     update_claude
     configure_git
     start_automation_api
     start_login_notifier
     start_claude_cron
+    start_entity_heartbeat
+    start_context_refresh
+    notify_ingress_advisory
     install_blueprint
 
     # Everything below this line used to run in the FOREGROUND before

@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.17"
+version: "2.5.1-wdn.18"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -52,6 +52,11 @@ options:
   dangerously_skip_permissions: false
   claude_extra_args: ""
   ha_smart_context: true
+  ha_context_refresh_hours: 24
+  notify_on_completion: true
+  notify_after_seconds: 60
+  notify_tts_target: ""
+  enable_ha_entities: true
   enable_ha_mcp: true
   ha_mcp_version: "8.3.0"
   enable_automation_api: true
@@ -88,6 +93,28 @@ schema:
   dangerously_skip_permissions: bool?
   claude_extra_args: str?
   ha_smart_context: bool?
+  # How often to regenerate that context. 0 disables the refresh and keeps the
+  # boot-time generation only. The default matters more than it looks: a Home
+  # Assistant instance routinely stays up for months, and a context file written
+  # once at boot ages the whole time -- listing devices that have gone and
+  # missing every one added since.
+  ha_context_refresh_hours: int(0,720)?
+  # Raise a Home Assistant notification when Claude finishes a long response or
+  # stops to ask for something. This is what makes the terminal usable from a
+  # phone you put down: without it a finished task is invisible until you
+  # reopen the add-on.
+  notify_on_completion: bool?
+  # Only notify for responses that took at least this long. Every prompt fires
+  # the completion hook, so notifying for all of them fills the drawer within a
+  # day and the notification stops being read.
+  notify_after_seconds: int(0,3600)?
+  # Speak notifications on this media player as well as showing them. Empty
+  # means notifications are silent.
+  notify_tts_target: str?
+  # Publish the add-on's own state (busy, last run, sign-in needed) as Home
+  # Assistant entities, so automations and dashboards can see Claude rather
+  # than only being able to call it.
+  enable_ha_entities: bool?
   enable_ha_mcp: bool?
   ha_mcp_version: str?
   enable_automation_api: bool?

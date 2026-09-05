@@ -51,7 +51,25 @@
         { id: 'left', label: '←', key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, repeat: true, seq: '\x1b[D', appSeq: '\x1bOD' },
         { id: 'down', label: '↓', key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, repeat: true, seq: '\x1b[B', appSeq: '\x1bOB' },
         { id: 'up', label: '↑', key: 'ArrowUp', code: 'ArrowUp', keyCode: 38, repeat: true, seq: '\x1b[A', appSeq: '\x1bOA' },
-        { id: 'right', label: '→', key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, repeat: true, seq: '\x1b[C', appSeq: '\x1bOC' }
+        { id: 'right', label: '→', key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, repeat: true, seq: '\x1b[C', appSeq: '\x1bOC' },
+        /* Printable characters, not keys.
+         *
+         * Every Claude Code command starts with a slash, and on an iOS keyboard
+         * "/" is two taps behind a modifier layer -- which is a lot of friction
+         * on the single most-typed character in the UI. The pipe is worse: it is
+         * absent from some software keyboards entirely, which makes ordinary
+         * shell work impossible from a phone.
+         *
+         * These deliberately do NOT go through the synthetic-keydown path the
+         * cursor keys use. That path exists because an arrow's bytes depend on
+         * the terminal's mode (DECCKM), so xterm.js has to decide them. A
+         * printable character has exactly one encoding in every mode, so writing
+         * it straight to the terminal is both simpler and more reliable than
+         * synthesising a keypress that xterm.js would have to reconstruct the
+         * character from. */
+        { id: 'slash', label: '/', char: '/', aria: 'Slash' },
+        { id: 'pipe', label: '|', char: '|', aria: 'Pipe' },
+        { id: 'paste', label: '📋', aria: 'Paste from clipboard', paste: true }
     ];
 
     var SYNTHETIC = '__claudeTerminalMobileKey';
@@ -133,8 +151,64 @@
         }
     }
 
+    /* Reading the clipboard needs an explicit permission and a secure context.
+     * Home Assistant is commonly reached over plain http on a LAN, where the
+     * API simply does not exist -- so the button is only built when it can
+     * actually work (see build()), rather than rendered and then failing on tap
+     * with nothing to explain why. */
+    function clipboardAvailable() {
+        try {
+            return !!(navigator.clipboard && typeof navigator.clipboard.readText === 'function');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function pasteFromClipboard() {
+        if (!clipboardAvailable()) {
+            return;
+        }
+        navigator.clipboard.readText().then(function (text) {
+            if (!text) {
+                return;
+            }
+            /* Bracketed paste is what tells the application this is pasted text
+             * rather than typing -- without it, a multi-line paste into Claude
+             * Code submits at the first newline and the rest lands in whatever
+             * comes next. xterm.js implements the wrapping itself when the
+             * application has asked for it, so paste() is used in preference to
+             * writing the raw text. */
+            try {
+                if (window.term && typeof window.term.paste === 'function') {
+                    window.term.paste(text);
+                    return;
+                }
+            } catch (e) {
+                /* fall through to the plain write */
+            }
+            writeBytes(text);
+        }).catch(function () {
+            /* Denied, or no permission prompt available. Nothing useful to do:
+             * the OS keyboard's own paste still works into the terminal. */
+        });
+    }
+
     function pressKey(spec) {
         var withCtrl = ctrlArmed;
+
+        /* A character key with Ctrl armed is Ctrl+that-character, which is the
+         * same interception the software keyboard gets -- so it goes through
+         * the same function rather than a second implementation of C0. */
+        if (spec.char) {
+            if (withCtrl) {
+                sendCtrlChar(spec.char);
+                setCtrl(false);
+            } else {
+                writeBytes(spec.char);
+            }
+            return;
+        }
+
         var handled = dispatchKey({
             key: spec.key,
             code: spec.code,
@@ -341,13 +415,17 @@
                out of it so the terminal is never drawn underneath. */
             '#terminal-container { height: calc(100% - var(--mkb-height) - env(safe-area-inset-bottom, 0px)) !important; }',
             '#mkb-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483000;',
-            '  display: flex; align-items: center; gap: 4px; box-sizing: border-box;',
-            '  padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) 6px;',
+            '  display: flex; align-items: center; gap: 3px; box-sizing: border-box;',
+            '  padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px)) 4px;',
             '  background: #15161e; border-top: 1px solid #414868;',
             '  font: 500 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;',
             '  touch-action: none; -webkit-user-select: none; user-select: none; }',
-            '#mkb-keys { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; }',
-            '.mkb-key { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0 2px;',
+            /* Gaps and minimum widths are tuned for the widest bar (11 keys)
+               on the narrowest phone: at 360px that leaves ~28px per key, which
+               is narrow but hittable, and the keys grow to fill anything
+               wider. */
+            '#mkb-keys { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; }',
+            '.mkb-key { flex: 1 1 auto; min-width: 26px; height: 36px; padding: 0 2px;',
             '  display: flex; align-items: center; justify-content: center;',
             '  color: #c0caf5; background: #1f2335; border: 1px solid #414868; border-radius: 6px;',
             '  font: inherit; -webkit-appearance: none; appearance: none; cursor: pointer; }',
@@ -371,11 +449,22 @@
         keyRow.id = 'mkb-keys';
 
         KEYS.forEach(function (spec) {
-            var button = makeButton(spec.label, spec.id === 'ctrl' ? 'Control (sticky)' : spec.label);
+            /* A paste button that cannot read the clipboard is worse than no
+             * paste button: it looks like the feature is broken rather than
+             * absent. */
+            if (spec.paste && !clipboardAvailable()) {
+                return;
+            }
+
+            var aria = spec.aria || (spec.id === 'ctrl' ? 'Control (sticky)' : spec.label);
+            var button = makeButton(spec.label, aria);
+
             if (spec.sticky) {
                 ctrlButton = button;
                 button.setAttribute('aria-pressed', 'false');
                 bindPress(button, function () { setCtrl(!ctrlArmed); }, false);
+            } else if (spec.paste) {
+                bindPress(button, pasteFromClipboard, false);
             } else {
                 bindPress(button, function () { pressKey(spec); }, !!spec.repeat);
             }

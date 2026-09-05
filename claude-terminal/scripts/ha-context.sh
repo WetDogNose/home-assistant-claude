@@ -317,9 +317,29 @@ This add-on runs an Automation API server allowing Home Assistant automations, s
 
 - **Endpoint**: `POST http://claude_terminal_wdn:8128/api/prompt` (or internal port set in `automation_api_port`)
 - **Authentication**: Requires `X-API-Key` or `Authorization: Bearer` header matching the token stored in `/data/automation_api_token`.
-- **Payload Schema**: `{"prompt": "Your prompt text", "timeout": 120}`
+- **Payload Schema**: `{"prompt": "...", "timeout": 120, "session": "name", "async": false}`
 - **Response Schema**: `{"success": true, "response": "Output text", "duration_seconds": 3.42, "exit_code": 0}`
-- **Security Controls**: Internal container bridge network isolation, IP subnet filtering, single-process mutex lock, rate-limiting (10 req/min), and safe parameterized subprocess execution.
+- **Async**: `{"async": true}` answers `202` with `{job_id, poll_url, event}` and the
+  result arrives as the Home Assistant event `claude_terminal_job_finished`. Prefer
+  this for anything slow: Home Assistant's `rest_command` gives up after 10 seconds.
+- **Jobs**: `GET /api/jobs` and `GET /api/jobs/<id>` (same API key). Kept in memory,
+  capped at 50, lost on restart — the fired event is the durable record.
+- **Sessions**: `"session": "name"` holds a conversation across calls.
+- **Security Controls**: Internal container bridge network isolation, IP subnet filtering, single-process mutex lock, rate-limiting (10 prompt starts/min, 120 job polls/min), and safe parameterized subprocess execution.
+
+## Reporting Back
+
+This add-on publishes its own state to Home Assistant, and can tell the user
+what it is doing without them watching the terminal:
+
+- `ha-notify "<title>" "<message>"` raises a persistent notification.
+- `ha-tts "<message>" [media_player.x]` speaks it.
+- `ha-entity set <key>=<value>` updates `binary_sensor.claude_terminal_busy`,
+  `sensor.claude_terminal_status` and the rest of the add-on's entities.
+
+Claude Code hooks already handle the common cases (a finished long task, a
+request for permission), so raise a notification yourself only when the user
+asked to be told something specific.
 
 ## Add-on Skills
 
@@ -338,6 +358,42 @@ reconstructing a command's behaviour from `--help`:
 | `ha-announce` | `ha-tts`, `ha-notify`, `ha-assist` |
 | `claude-automation-api` | The Automation API, blueprint, `claude-bot` |
 | `claude-scheduled-tasks` | `claude-cron` |
+| `claude-terminal-notifications` | `claude-hooks`, `ha-entity`, notifying the user |
+| `claude-terminal-sessions` | `claude-session`, `claude-usage` |
+
+## Working Style
+
+**Fan out subagents when the work is genuinely parallel.** A Home Assistant
+instance is wide: dozens of integrations, hundreds of entities, a config
+directory with many independent files. When a task splits into parts that do
+not depend on each other -- auditing several integrations, checking a dozen
+entities' history, drafting separate automations, reading across many YAML
+files to answer one question -- dispatch them at once rather than in sequence,
+and keep the conclusions rather than the raw file dumps. Send independent
+agents in a single batch so they actually run concurrently.
+
+Do not fan out work that is sequential or that shares state. Edits to the same
+file, a change and the validation of that change, or anything where step two
+needs step one's result, are slower and less reliable split up. One agent
+reading the whole picture beats three agents each holding a third of it.
+
+**Review your own work adversarially before calling it done.** Do not simply
+re-read what you wrote and agree with it. Try to break it:
+
+- For a config change, ask what happens on reload with an entity that is
+  `unavailable`, a template that raises, a device that has gone, or a value at
+  the edge of its range. Then run `ha-validate` and actually read the output.
+- For an automation, ask what fires it that you did not intend, whether its own
+  actions can re-trigger it, and what happens when two triggers arrive at once.
+- For anything touching a device, ask what the failure looks like physically --
+  a lock that opens, a heater that stays on, an alarm that does not arm.
+- When the stakes justify it, dispatch a subagent to review the change with a
+  brief to find what is wrong with it, and take the finding seriously rather
+  than defending the original.
+
+Report what you actually verified, and say plainly what you did not. "Validated
+and reloaded, the template still errors on a missing sensor" is worth more than
+"done".
 
 Anything under `/config` is the user's live home. Validate before reloading, and
 prefer reloading a single integration over restarting Home Assistant.

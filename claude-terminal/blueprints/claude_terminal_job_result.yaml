@@ -1,0 +1,226 @@
+blueprint:
+  name: Act on a finished Claude job
+  description: >
+    Delivers the answer from an asynchronous Claude Terminal job. Pair this
+    with *Scheduled Claude report* (or anything else that posts a prompt with
+    `"async": true`): that side starts the work and forgets about it, this
+    side listens for the result and tells you.
+
+
+    ## How the result arrives
+
+
+    An async prompt is answered immediately with a job id, and the real answer
+    turns up later as the Home Assistant event
+    `claude_terminal_job_finished`, carrying:
+
+
+    - `job_id` -- the job's identifier
+
+    - `status` / `success` -- how it ended
+
+    - `session` -- the named conversation it belonged to
+
+    - `duration_seconds` -- how long Claude took
+
+    - `response` -- Claude's answer, **cut to the first 1000 characters**
+
+    - `truncated` -- true when that cut removed something
+
+    - `error` -- set instead of `response` when the run failed
+
+
+    When `truncated` is true the message says so, and the whole job is still
+    readable from the add-on's `/api/jobs` endpoint with your API key.
+
+
+    ## One automation per destination
+
+
+    Every job in the add-on fires this event, so an unfiltered copy of this
+    blueprint announces your weekly automation review and your five-second
+    voice questions alike. Set **Session filter** to the session name the
+    posting automation uses and this instance only handles that one. Leave it
+    empty and it handles everything.
+
+
+    ## Why the guards are here
+
+
+    Claude runs with access to Home Assistant, so this event is downstream of
+    real Home Assistant activity, and the actions below (a notification, a
+    spoken announcement) are themselves activity. `mode: single` drops a
+    second result that arrives while one is still being delivered, and
+    `max_exceeded: silent` keeps that drop from writing a log line -- because
+    the log line is another record something could trigger on.
+  domain: automation
+  input:
+    session_filter:
+      name: Session filter
+      description: >
+        Only act on jobs from this named session. Leave empty to act on every
+        finished job, from every session.
+      default: ""
+      selector:
+        text:
+    notify_service:
+      name: Notify service
+      description: >
+        Optional. Service name such as `notify.mobile_app_pixel` or
+        `notify.persistent_notification`. Leave empty to skip -- a persistent
+        notification is created either way.
+      default: ""
+      selector:
+        text:
+    tts_engine:
+      name: Text-to-speech entity
+      description: >
+        Optional. The `tts.` entity that does the speaking. Required for
+        speech: a media player is where a voice comes out, not what produces
+        it. Leave empty to skip speech.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: tts
+    tts_target:
+      name: Speaker
+      description: >
+        Optional. Media player that reads the answer aloud. Needs the
+        text-to-speech entity above to be set as well. Bear in mind a report
+        can be a thousand characters of speech.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+    only_notify_on_failure:
+      name: Only notify on failure
+      description: >
+        Stay quiet when the job succeeded, and speak up only when it failed.
+        Useful for a job whose whole point is that it normally has nothing to
+        report.
+      default: false
+      selector:
+        boolean:
+
+triggers:
+  - trigger: event
+    event_type: claude_terminal_job_finished
+
+# Automation-level variables are rendered with `trigger` in scope, so the
+# event payload is unpacked once here and every step below reads the same
+# values. Each field is defaulted: `error` is absent on success, `response` is
+# absent on failure, and `truncated` is absent on older add-on versions.
+variables:
+  session_filter: !input session_filter
+  notify_service: !input notify_service
+  tts_engine: !input tts_engine
+  tts_target: !input tts_target
+  only_notify_on_failure: !input only_notify_on_failure
+  job_id: "{{ trigger.event.data.job_id | default('unknown', true) }}"
+  job_session: "{{ trigger.event.data.session | default('', true) }}"
+  job_success: "{{ trigger.event.data.success | default(false, true) | bool(false) }}"
+  job_truncated: "{{ trigger.event.data.truncated | default(false, true) | bool(false) }}"
+  job_duration: "{{ trigger.event.data.duration_seconds | default(0, true) }}"
+  job_text: >-
+    {{ (trigger.event.data.response
+        or trigger.event.data.error
+        or 'Claude returned no text.') | trim }}
+
+conditions:
+  # An empty filter means "any session". Compared after trimming so a stray
+  # space in the input does not quietly match nothing forever.
+  - condition: template
+    value_template: >-
+      {{ session_filter | trim | length == 0
+         or session_filter | trim == job_session }}
+
+# QUEUED, not single -- the one blueprint here where dropping a run is the
+# wrong answer.
+#
+# Everything this automation does is report a result. The event it triggers on
+# is fired once per finished job and is the only durable record of that job:
+# the job itself is held in memory in the add-on, capped, and lost on restart.
+# So a run dropped for overlapping is not a delayed notification, it is a
+# result nobody will ever see -- and two async jobs finishing within a few
+# seconds of each other is the normal case once more than one automation uses
+# them.
+#
+# The feedback-loop argument that makes `single` right elsewhere does not apply
+# here: the trigger is claude_terminal_job_finished, which only the add-on's
+# API server fires, and the actions below are notifications and speech. None of
+# them can produce that event, so this automation cannot re-trigger itself no
+# matter how its actions land.
+#
+# max is a ceiling on that queue, so a runaway producer of job events still
+# cannot make Home Assistant grow an unbounded backlog of pending runs.
+mode: queued
+max: 10
+max_exceeded: silent
+
+actions:
+  # The success branch. Stopping here rather than wrapping everything below in
+  # a choose keeps the delivery steps at one indent level and makes the
+  # skipped run readable in the trace.
+  - if:
+      - condition: template
+        value_template: "{{ only_notify_on_failure and job_success }}"
+    then:
+      - stop: "Job succeeded and this automation only reports failures."
+
+  - variables:
+      job_title: >-
+        {{ 'Claude report ready' if job_success else 'Claude job failed' }}
+        {%- if job_session %} ({{ job_session }}){% endif %}
+      job_message: >-
+        {{ job_text }}
+
+        {% if job_truncated %}
+
+        (Only the first 1000 characters fit in the event. Fetch job
+        {{ job_id }} from the add-on's /api/jobs endpoint to read the rest.)
+
+        {% endif %}
+
+        Job {{ job_id }} finished in {{ job_duration }}s.
+
+  # Always created: it needs no configuration, survives a phone being off, and
+  # is the one delivery path that cannot fail because a service name was typed
+  # wrong. notification_id is per job, so results do not overwrite each other.
+  - action: persistent_notification.create
+    data:
+      title: "{{ job_title }}"
+      message: "{{ job_message }}"
+      notification_id: "claude_terminal_job_{{ job_id }}"
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_service | trim | length > 0 }}"
+        sequence:
+          # Templated service name, so one text input covers every notify
+          # platform. continue_on_error keeps a typo in that name from
+          # swallowing the speech step below it.
+          - action: "{{ notify_service | trim }}"
+            data:
+              title: "{{ job_title }}"
+              message: "{{ job_message }}"
+            continue_on_error: true
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ tts_engine | trim | length > 0
+                 and tts_target | trim | length > 0 }}
+        sequence:
+          # Spoken text drops the job id and the truncation note -- they are
+          # useful to read and tedious to listen to.
+          - action: tts.speak
+            target:
+              entity_id: "{{ tts_engine }}"
+            data:
+              media_player_entity_id: "{{ tts_target }}"
+              message: "{{ job_title }}. {{ job_text }}"
+            continue_on_error: true

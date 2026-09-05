@@ -1,0 +1,178 @@
+blueprint:
+  name: Ask Claude with your voice
+  description: >
+    Lets you ask Claude Code a question through Assist -- any pipeline, any
+    voice satellite, or the chat box in the sidebar -- and get the answer
+    spoken back in the same turn. Say "ask claude which lights are still on"
+    and Claude answers out loud.
+
+
+    ## This is the one place a synchronous call is right
+
+
+    The other Claude Terminal blueprints fire their prompt with `"async":
+    true` and collect the answer later from the
+    `claude_terminal_job_finished` event, because a Claude run can take
+    minutes and an automation that waits that long is an automation that is
+    stuck.
+
+
+    A voice assistant is the exception: the person is standing there waiting
+    for a sentence, and there is nowhere to deliver a late answer to. So this
+    blueprint blocks on the reply and speaks it.
+
+
+    That comes with a hard limit. Assist applies its own timeout to the
+    conversation turn, and it is shorter than the Automation API's 120-second
+    default -- so **keep these questions short**. A state lookup, a summary of
+    one thing, a yes or no. Anything that needs Claude to read files, search
+    or work through several steps belongs in the scheduled-report blueprint,
+    whose answer arrives as a notification instead of as speech. If the call
+    does not come back in time you hear the fallback sentence, not an error.
+
+
+    ## Sessions
+
+
+    The `session` input names a conversation that persists across calls, so
+    "ask claude what about tomorrow" can follow "ask claude what is the
+    forecast". Clear it if you would rather every question start cold.
+
+
+    ## Required setup
+
+
+    This blueprint calls a REST command, which Home Assistant only lets you
+    define in `configuration.yaml`. Add this once, then restart Home
+    Assistant. Without it the automation fails at runtime with an
+    unknown-service error:
+
+
+    ```yaml
+
+    rest_command:
+      claude_terminal_query:
+        url: "{{ url }}"
+        method: POST
+        headers:
+          X-API-Key: "{{ token }}"
+        content_type: "application/json"
+        payload: >-
+          {"prompt": {{ prompt | to_json }}
+          {%- if session is defined and session %}, "session": {{ session | to_json }}{% endif %}
+          {%- if run_async is defined and run_async %}, "async": true{% endif %}}
+        timeout: 150
+    ```
+
+
+    The API token is in `/data/automation_api_token` inside the add-on (run
+    `cat /data/automation_api_token` in the Claude Terminal), or whatever you
+    set as the `automation_api_key` option.
+  domain: automation
+  input:
+    sentences:
+      name: Sentences
+      description: >
+        What you say to Assist to reach Claude. `{question}` is a wildcard --
+        whatever fills it becomes the prompt. Add your own phrasings; every
+        line is matched independently.
+      default:
+        - "ask claude {question}"
+        - "ask claude to {question}"
+      selector:
+        text:
+          multiple: true
+    api_url:
+      name: Automation API URL
+      description: >
+        Endpoint URL of the Claude Terminal Automation API. Home Assistant
+        Core runs in its own container, so this must address the add-on by its
+        slug on the Docker network -- 127.0.0.1 would be Home Assistant
+        itself. Change the port only if you changed the
+        `automation_api_port` option.
+      default: "http://claude_terminal_wdn:8128/api/prompt"
+      selector:
+        text:
+    api_token:
+      name: API Token
+      description: Token from /data/automation_api_token in Claude Terminal.
+      selector:
+        text:
+          type: password
+    session:
+      name: Conversation session
+      description: >
+        Named conversation that carries context between questions, so
+        follow-ups work. Letters, digits, underscores and hyphens only. Leave
+        empty to make every question a fresh start.
+      default: "assist"
+      selector:
+        text:
+    fallback_response:
+      name: Fallback response
+      description: >
+        Spoken when the call fails, times out, or comes back with nothing.
+        Assist has to say something, so this is never left blank at runtime.
+      default: "Sorry, Claude did not answer in time."
+      selector:
+        text:
+
+# An Assist sentence trigger. Each configured sentence becomes a phrase the
+# conversation agent will match before it tries any of its built-in intents.
+triggers:
+  - trigger: conversation
+    command: !input sentences
+
+# Overlapping runs are dropped rather than queued, and the drop is silent.
+#
+# A conversation trigger cannot be fired by Home Assistant's own output the
+# way an event trigger can, but the guard still earns its place: Claude runs
+# with access to Home Assistant and its answer can change entity states, and
+# the Automation API serialises prompts behind a single-execution mutex. Two
+# questions asked at once would put the second in line behind a run that may
+# outlast the Assist timeout -- so it is better dropped, with the fallback
+# spoken, than queued.
+#
+# The drop is silent because the default max_exceeded is `warning`, which
+# writes a log line; on an automation whose action causes further Home
+# Assistant activity, that log line is itself an event something could trigger
+# on.
+mode: single
+max_exceeded: silent
+
+actions:
+  # Synchronous on purpose -- see the note in the description. `response_variable`
+  # is what makes the rest_command hand its reply back instead of firing and
+  # forgetting; the shape is {"status": <http status>, "content": <parsed body>},
+  # so Claude's text is at .content.response.
+  - action: rest_command.claude_terminal_query
+    data:
+      url: !input api_url
+      token: !input api_token
+      session: !input session
+      prompt: >-
+        {{ trigger.slots.question | default(trigger.sentence, true) }}
+    response_variable: claude_result
+
+  # Pulled apart in one place so the condition below and the spoken answer
+  # cannot disagree about what "empty" means. Every hop is guarded: a failed
+  # call leaves `content` undefined, a timeout can leave `response` null, and
+  # a refusal returns a body with an `error` instead.
+  - variables:
+      claude_answer: >-
+        {{ (claude_result.content.response
+            if claude_result is defined
+            and claude_result.content is defined
+            and claude_result.content is mapping
+            else '') | default('', true) | trim }}
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ claude_answer | length > 0 }}"
+        sequence:
+          - set_conversation_response: "{{ claude_answer }}"
+    # Assist will not accept silence, so anything other than a real answer --
+    # HTTP error, rate limit, timeout, empty body -- says the fallback.
+    default:
+      - set_conversation_response: !input fallback_response
