@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.5.1-wdn.17
+
+### ⌨️ Cursor keys (and Esc, Tab, Ctrl) on phones and tablets
+
+Touch devices now get a key bar along the bottom of the terminal: `esc`, `tab`,
+`⇧tab`, a sticky `ctrl`, and the four cursor keys.
+
+iOS software keyboards have no cursor keys, no Esc and no Ctrl, which between
+them are most of how Claude Code and tmux are actually driven — arrows move
+through Claude's prompts and your input history, Esc interrupts, Shift+Tab
+cycles the permission mode, Ctrl+C stops a run and Ctrl+B is the tmux prefix.
+The terminal was readable from a phone but not usable from one.
+
+Details worth knowing:
+
+- **Hold an arrow to repeat it**, so moving through a long line is one press.
+- **`ctrl` is sticky.** Tap it, then tap another bar key *or* type a letter on
+  your own keyboard, and Ctrl applies to that one key.
+- **The bar sits above the software keyboard**, not behind it. `position: fixed`
+  anchors to the layout viewport, which iOS does not shrink when the keyboard
+  opens, so the bar tracks `visualViewport` instead.
+- **Tapping a key does not dismiss the keyboard** — presses never move focus off
+  the terminal.
+- **Tap `▾` to collapse it**, `⌨` to bring it back; the choice is remembered per
+  device.
+- **Desktop browsers are untouched.** The bar is gated on the browser reporting
+  a coarse pointer, so a laptop — including one with a touchscreen — sees no
+  change.
+
+The keys go through xterm.js's own keyboard path rather than writing escape
+bytes directly, which is what makes them correct inside tmux and Claude Code:
+both switch the terminal into application cursor key mode, where Up is `ESC O A`
+and not `ESC [ A`. xterm.js already tracks that mode, so the arrows follow it
+without this add-on having to.
+
+Implementation note for anyone reading the tree: ttyd compiles its entire web
+client into a single `index.html` embedded in its binary and has no plugin
+surface, so the image build recovers that page out of the installed binary and
+appends one script to it (`claude-terminal/web/`), then serves the result with
+`ttyd --index`. ttyd's client stays authoritative and a ttyd upgrade brings its
+own client along with no diff to resolve. The extraction fails the build rather
+than skipping, because a silent skip ships an image whose only symptom is that
+phones cannot type.
+
 ## 2.5.1-wdn.16
 
 ### 🔗 The sign-in link in the notification now works

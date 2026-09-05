@@ -73,6 +73,31 @@ exit $rc
 IN
 then rc=1; fi
 
+# The web client ttyd serves. It is generated at build time from the ttyd binary
+# in the image, so unlike the files above it can go missing without any COPY
+# having failed -- and its only symptom is that phones cannot type, which no
+# check that asks "did the add-on boot?" would ever notice.
+echo "== mobile key bar is baked into the served client =="
+if ! run <<'IN'
+rc=0
+index=/opt/web/index.html
+if [ ! -s "$index" ]; then
+  echo "FAIL: $index missing or empty (ttyd would fall back to its stock client, with no touch keys)"; rc=1
+else
+  grep -q 'claude-terminal-mobile-keys' "$index" || { echo "FAIL: $index carries no key bar"; rc=1; }
+  # ttyd's own client has to still be in there: appending is the whole design,
+  # and an index.html that is ONLY our script is a blank terminal.
+  grep -q 'xterm' "$index" || { echo "FAIL: $index is not ttyd's client"; rc=1; }
+  [ "$(wc -c < "$index")" -gt 100000 ] || { echo "FAIL: $index is too small to be ttyd's client"; rc=1; }
+  [ "$rc" -eq 0 ] && echo "OK: $index ($(wc -c < "$index") bytes, key bar present)"
+fi
+for f in /opt/web/mobile-keys.js /opt/web/build-index.py; do
+  [ -f "$f" ] || { echo "FAIL: $f missing"; rc=1; }
+done
+exit $rc
+IN
+then rc=1; fi
+
 # ldd resolves relocations WITHOUT executing, so it is safe under qemu-user
 # where running a JIT binary is not. This is the check that catches a binary
 # that is present, +x, and aborts on exec.

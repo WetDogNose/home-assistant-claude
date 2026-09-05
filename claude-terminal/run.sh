@@ -623,6 +623,21 @@ start_web_terminal() {
         bashio::log.warning "require_ingress_user is false and there is no Supervisor: enforcement off (local development)"
     fi
 
+    # Serve ttyd's client with the touch key bar baked in (see web/ and the
+    # Dockerfile step that builds it). Software keyboards have no cursor keys,
+    # Esc or Ctrl, so without it the terminal cannot be driven from a phone.
+    #
+    # Guarded rather than assumed: a missing or empty file means ttyd falls back
+    # to the client embedded in its own binary and the terminal still comes up.
+    # Losing the key bar is a degraded phone experience; passing --index at a
+    # file ttyd cannot read makes it exit, which is a dead add-on for everyone.
+    local index_args=()
+    if [ -s /opt/web/index.html ]; then
+        index_args=(--index /opt/web/index.html)
+    else
+        bashio::log.warning "/opt/web/index.html is missing; serving ttyd's stock client (no touch key bar)"
+    fi
+
     # Run ttyd with keepalive configuration to prevent WebSocket disconnects
     # See: https://github.com/heytcass/home-assistant-addons/issues/24
     exec ttyd \
@@ -630,6 +645,7 @@ start_web_terminal() {
         --interface 0.0.0.0 \
         --writable \
         ${auth_args[@]+"${auth_args[@]}"} \
+        ${index_args[@]+"${index_args[@]}"} \
         --ping-interval 30 \
         --client-option enableReconnect=true \
         --client-option reconnect=10 \
