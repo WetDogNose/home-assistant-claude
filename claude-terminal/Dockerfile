@@ -138,7 +138,23 @@ COPY blueprints/ /opt/blueprints/
 # into $HOME/.claude/skills at boot; they are read, never executed, so unlike
 # /opt/scripts they do not need to be +x.
 COPY skills/ /opt/skills/
+# ttyd's web client, plus the touch key bar appended to it. Kept out of
+# /opt/scripts because nothing here is a command: it is served to the browser.
+COPY web/ /opt/web/
 RUN chmod +x /run.sh /opt/scripts/*
+
+# Bake the mobile key bar into ttyd's own index.html.
+#
+# Software keyboards have no cursor keys, Esc or Ctrl, which is most of how
+# Claude Code and tmux are driven, so the terminal was readable from a phone but
+# not usable from one. run.sh serves the result with `ttyd --index`.
+#
+# This runs against the ttyd installed above, so the client always matches the
+# server, and it fails the build rather than skipping: a silent skip ships an
+# image whose only symptom is that phones cannot type -- invisible to every
+# check that asks whether the add-on booted.
+RUN python3 /opt/web/build-index.py \
+    && grep -q 'claude-terminal-mobile-keys' /opt/web/index.html
 
 # A HEALTHCHECK is the prerequisite for a Supervisor watchdog: without one the
 # container reports STARTED the moment the process execs, so a watchdog would

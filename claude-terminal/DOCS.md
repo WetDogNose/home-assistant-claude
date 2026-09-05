@@ -110,6 +110,16 @@ The shipped set is refreshed on every add-on start, so updates take effect and w
 - **Copying & URL Clicking**: With default settings (`tmux_mouse: false`), native browser selection works directly — select text with your mouse and copy with `Ctrl+C` / `Cmd+C` or right-click. Terminal URLs (`https://...`) can be clicked directly to open in a new tab.
 - **Tmux Mouse Mode**: If `tmux_mouse: true` is enabled, `Shift+drag` bypasses tmux mouse mode to perform native browser selection, and `Shift+Click` opens URLs.
 - **Pasting**: Use `Ctrl+Shift+V` (or `Cmd+V` / right-click, depending on browser).
+- **Phones & tablets — the key bar**: touch devices get a row of keys along the
+  bottom of the terminal, because software keyboards have none of them: `esc`,
+  `tab`, `⇧tab`, `ctrl` and the four cursor keys. They are what Claude Code is
+  actually driven with — arrows move through its prompts and your input history,
+  `esc` interrupts, `⇧tab` cycles the permission mode, and `ctrl` covers
+  `Ctrl+C` and the tmux `Ctrl+B` prefix. Hold an arrow to repeat it. `ctrl` is
+  sticky: tap it, then tap another key on the bar *or* type a letter on your own
+  keyboard, and it applies to that one key. Tap `▾` to collapse the bar (the
+  choice is remembered on that device) and `⌨` to bring it back. It appears only
+  on touch devices — desktop browsers are unchanged.
 
 ### File access
 
@@ -288,6 +298,8 @@ Read this before signing in — it grants real access.
 - **The sign-in link does not authorize / "Invalid request format"**: on 2.5.1-wdn.15 and earlier both the sign-in notification and `claude-login-url` cut the URL off at the width of the terminal, dropping the `state` and `code_challenge` parameters. Update to 2.5.1-wdn.16 or later, then start the login again — the URL Claude Code prints is only valid for one attempt, so an already-issued one cannot be repaired by hand.
 - **Can't copy the OAuth login URL**: run `claude-login-url` — as well as writing the URL to `/config`, it now pushes it to your Home Assistant **notifications**, where you can select and copy it with the browser's own clipboard. Full detail: the browser terminal's clipboard path truncates very long payloads, and the login URL is one — a cut-off `state` parameter causes exactly that authorization error. Reliable path: while the login prompt is showing, open a second tmux window (`Ctrl+B` then `C`), run `claude-login-url`, and open `/config/claude-login-url.txt` with the File Editor add-on (or over Samba) — copy the URL from there. Switch back with `Ctrl+B` then `L` to paste the resulting code. Delete the file when done. Don't click the link in the terminal directly: link detection truncates URLs that wrap across lines.
 - **"Press Enter to Reconnect", or the panel loads but never connects**: you have `require_ingress_user: true` and your installation does not attach the user identity to the ingress WebSocket. Set it back to `false` and restart. This is why the option defaults to off.
+- **No key bar on a phone or tablet**: the bar is shown when the browser reports a touch-style pointer, so a device reporting a mouse (some Android tablets in desktop mode, or a browser with desktop-site forced) will not get it — turn desktop-site off and reload. If it is missing everywhere, including on a phone, the add-on log will carry `serving ttyd's stock client (no touch key bar)`; that means the image is built without it, and reinstalling or updating the add-on restores it.
+
 - **Terminal opens blank or closes instantly**: this means Claude Code could not start. The add-on now detects that at launch and drops you to a shell with an explanation instead of a blank screen, so run `claude-doctor` there — it reports each installed copy and whether it actually runs. The usual cause is an update pulling a build incompatible with this image; `rm -f ~/.local/bin/claude` and restart to fall back to the bundled copy, then set `claude_version` to a known-good `X.Y.Z` so the next update does not reintroduce it.
 - **Claude exits immediately or behaves oddly**: restart the add-on so the background auto-updater can fetch the latest Claude Code; check the add-on log for update messages.
 - **Diagnostics**: run `claude-doctor` in the terminal for connectivity, memory, and environment checks.
