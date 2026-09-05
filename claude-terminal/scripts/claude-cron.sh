@@ -205,7 +205,9 @@ parse_schedule() {
                     # Strip leading zeros before the range check: 08 is octal to
                     # bash's arithmetic and would be a syntax error, not an 8.
                     hh=$((10#$hh)); mm=$((10#$mm))
-                    [ "$hh" -le 23 ] && [ "$mm" -le 59 ] || return 1
+                    if [ "$hh" -gt 23 ] || [ "$mm" -gt 59 ]; then
+                        return 1
+                    fi
                     echo "cron ${mm} ${hh} * * *"
                     return 0
                     ;;

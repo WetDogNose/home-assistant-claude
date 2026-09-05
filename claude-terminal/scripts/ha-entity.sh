@@ -273,7 +273,10 @@ case "${1:-}" in
         ;;
     publish)
         require_token || exit 1
-        [ -n "${2:-}" ] && [ -n "${3:-}" ] || { echo "Usage: ha-entity publish <entity_id> <state> [attributes-json]" >&2; exit 1; }
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo "Usage: ha-entity publish <entity_id> <state> [attributes-json]" >&2
+            exit 1
+        fi
         publish_entity "$2" "$3" "${4:-{\}}"
         ;;
     heartbeat)

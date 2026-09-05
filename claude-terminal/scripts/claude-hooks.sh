@@ -269,7 +269,9 @@ set_state() {
 # written final line rather than aborting on it.
 last_assistant_text() {
     local transcript="$1" text
-    [ -n "$transcript" ] && [ -f "$transcript" ] || return 0
+    if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+        return 0
+    fi
 
     # -R is not optional: without it jq parses each line into an object, and
     # `fromjson` on an object errors -- swallowed by `?` -- so this returned
