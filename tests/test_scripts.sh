@@ -464,6 +464,37 @@ else
     FAILED=$((FAILED + 1))
 fi
 
+# _state_mtime must emit digits or nothing -- never prose.
+#
+# GNU's `stat -f` is --file-system: it IGNORES the format string and prints a
+# multi-line report starting `  File: "..."`. Fed into `$(( now - mtime ))` that
+# blob is parsed as an arithmetic expression, so bash reads `File` as a variable
+# name: an "unbound variable" abort under `set -u` -- which killed callers
+# outright and lost their writes -- and a silent syntax error otherwise, which
+# skips the stale-lock check for ever, so a lock left by a killed daemon is
+# never broken and every later caller times out.
+#
+# This passed on macOS (where `stat -c` fails and the BSD `-f` really does mean
+# mtime) and failed on Linux, which is what CI runs.
+for probe in "$STATE_TEST_DIR" /nonexistent-path-for-a-test; do
+    probe_mtime=$(_state_mtime "$probe")
+    case "$probe_mtime" in
+        ''|*[!0-9]*)
+            if [ -z "$probe_mtime" ] && [ ! -e "$probe" ]; then
+                echo "  [PASS] _state_mtime returns nothing for a missing path"
+                PASSED=$((PASSED + 1))
+            else
+                echo "  [FAIL] _state_mtime returned non-numeric output: ${probe_mtime%%$'\n'*}"
+                FAILED=$((FAILED + 1))
+            fi
+            ;;
+        *)
+            echo "  [PASS] _state_mtime returns a bare epoch for an existing path"
+            PASSED=$((PASSED + 1))
+            ;;
+    esac
+done
+
 # The race this library exists to close: concurrent read-modify-writes.
 # Before the lock, parallel writers lost updates silently -- adding a scheduled
 # job while one was running simply discarded the new job.

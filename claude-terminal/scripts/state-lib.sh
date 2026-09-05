@@ -31,7 +31,29 @@ STATE_LOCK_WAIT_SECONDS="${STATE_LOCK_WAIT_SECONDS:-10}"
 # state_lock, where treating an unreadable lock as timestamp 0 made it look
 # infinitely old.
 _state_mtime() {
-    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
+    local out
+
+    # GNU / busybox spelling first.
+    out=$(stat -c %Y "$1" 2>/dev/null) || out=""
+    case "$out" in ''|*[!0-9]*) out="" ;; esac
+
+    # BSD / macOS spelling, only if the first produced nothing usable.
+    #
+    # Each result is checked for digits before it is returned, and that is not
+    # belt-and-braces. GNU's `stat -f` is --file-system: it IGNORES the format
+    # string and prints a multi-line report beginning `  File: "..."`. Passed
+    # straight into `$(( now - mtime ))` that blob is parsed as an expression,
+    # so bash reads `File` as a variable name -- an "unbound variable" abort
+    # under `set -u` (which killed callers outright and lost their writes), and
+    # a silent arithmetic syntax error otherwise, which skips the stale-lock
+    # check for ever. A lock left behind by a killed daemon would then never be
+    # broken and every later caller would time out instead.
+    if [ -z "$out" ]; then
+        out=$(stat -f %m "$1" 2>/dev/null) || out=""
+        case "$out" in ''|*[!0-9]*) out="" ;; esac
+    fi
+
+    printf '%s' "$out"
 }
 
 # Tenths of a second between attempts. Whole-second retries are too coarse:
