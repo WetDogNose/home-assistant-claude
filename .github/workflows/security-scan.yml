@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Same single source of truth as build-test.yml -- scanning a different
       # base than the one that ships would make these results meaningless.
@@ -61,7 +61,7 @@ jobs:
           echo "Scanning base: $image"
 
       - name: Build image for scanning
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ./claude-terminal
           push: false
@@ -115,7 +115,7 @@ jobs:
       # are in the job summary above regardless. Drop continue-on-error if the
       # repo becomes public or gains Advanced Security.
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         if: always()
         continue-on-error: true
         with:
