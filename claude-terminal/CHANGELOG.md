@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.5.1-wdn.19
+
+Dependency refresh.
+
+- **Boot no longer dies when an option cannot be read.** The Home Assistant base
+  image moved bashio from 0.17.5 to 0.19.0 on 2026-10-02, and bashio 0.18 turned
+  on `inherit_errexit`. That makes a failed Supervisor API read inside `$(…)`
+  fatal under `set -e`, so a transient API failure at start-up — or any boot
+  outside a Supervisor, which is what CI's boot test does — exited the add-on at
+  the git identity step. Those reads now fall back like the rest of `run.sh`.
+  Every image built since that date carries this bashio, so this fix ships with
+  the refresh rather than after it.
+- **Claude Code** — the bundled copy is resolved at image build time, so this
+  image ships the current release (2.1.296). Existing installs also pick it up
+  into `/data` on the next add-on start.
+- **ha-mcp default 8.3.0 → 8.6.0.** The stdio contract the add-on depends on is
+  unchanged — `ha-mcp` still maps to `__main__:main` and config still reads
+  `HOMEASSISTANT_URL` / `HOMEASSISTANT_TOKEN`. 8.6.0 relaxes its Python
+  requirement to `>=3.13,<3.15`; the add-on keeps provisioning 3.13. If you set
+  `ha_mcp_version` yourself, it is left alone.
+- **uv 0.13** is picked up by the image build (unpinned by design). Its headline
+  change — the default Python moving to 3.15 — does not reach the add-on,
+  which always asks for 3.13 explicitly. uv's cache format also changed, so the
+  first start after updating may rebuild the ha-mcp environment once.
+- **GitHub Actions**: setup-qemu-action v4.4.0, setup-buildx-action v4.4.1,
+  build-push-action v7.4.0, and current commits behind the moving v1/v4 tags for
+  claude-code-action and codeql-action/upload-sarif.
+- **home-assistant/builder stays at 2026.02.1.** The action is now deprecated
+  upstream in favour of composable reusable actions, and 2026.02.1 is the last
+  release with a published builder image — 2026.09.0 still 404s the pull.
+  Migrating publish-images.yml to the new actions is separate work.
+- **flake.lock**: nixpkgs 2026-08-23 → 2026-10-08 (dev shell only).
+
 ## 2.5.1-wdn.18
 
 The add-on could always be *told* to do things. This release is about it being

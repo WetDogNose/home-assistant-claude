@@ -19,6 +19,11 @@ set -o pipefail
 # onwards, which is how the Automation API came to be started with
 # `--port ''` and refuse to launch at all.
 #
+# Since bashio 0.18 (base image, 2026-10-02) a failed read is also FATAL when
+# assigned bare: bashio turns on inherit_errexit, so `x=$(bashio::config ...)`
+# under `set -e` exits the whole boot. Every read whose failure is survivable
+# must go through here or carry its own `|| x=...`.
+#
 # Note this is for options where falling back is safe. require_ingress_user
 # deliberately does NOT use it: that one must fail CLOSED, and has its own
 # inline handling that treats anything but an explicit "false" as enabled.
@@ -632,8 +637,8 @@ install_persistent_packages() {
 # because /data/options.json is plaintext and rides along in HA backups.
 configure_git() {
     local git_name git_email
-    git_name=$(bashio::config 'git_user_name' '')
-    git_email=$(bashio::config 'git_user_email' '')
+    git_name=$(config_or 'git_user_name' '')
+    git_email=$(config_or 'git_user_email' '')
 
     # $HOME is /data/home, so ~/.gitconfig persists across restarts
     if [ -n "$git_name" ] && [ "$git_name" != "null" ]; then
@@ -684,7 +689,7 @@ build_claude_flags() {
     fi
 
     local extra
-    extra=$(bashio::config 'claude_extra_args' '')
+    extra=$(config_or 'claude_extra_args' '')
     if [ -n "$extra" ] && [ "$extra" != "null" ]; then
         flags="${flags:+$flags }$extra"
     fi
