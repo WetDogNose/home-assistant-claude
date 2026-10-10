@@ -8,7 +8,7 @@ set -e
 # Check if ha-mcp setup should be enabled
 configure_ha_mcp_server() {
     local enable_ha_mcp
-    enable_ha_mcp=$(bashio::config 'enable_ha_mcp' 'true')
+    enable_ha_mcp=$(bashio::config 'enable_ha_mcp' 'true') || enable_ha_mcp=""
 
     if [ "$enable_ha_mcp" != "true" ]; then
         bashio::log.info "ha-mcp integration is disabled in configuration"
@@ -30,7 +30,8 @@ configure_ha_mcp_server() {
     fi
 
     local version
-    version=$(bashio::config 'ha_mcp_version' '8.3.0')
+    version=$(bashio::config 'ha_mcp_version' '8.6.0') || version=""
+    if [ -z "$version" ] || [ "$version" = "null" ]; then version="8.6.0"; fi
 
     # Remove existing ha-mcp configuration if present (to ensure clean state)
     claude mcp remove home-assistant 2>/dev/null || true

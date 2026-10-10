@@ -87,7 +87,7 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
 - **`jq`'s `//` is not a null-coalesce.** It returns its right-hand side for `false` as well as `null`, so `.enabled // true` reads a disabled record back as enabled. This shipped as "a paused cron job still runs". Every boolean default in this repo is written as an explicit comparison (`if .enabled == false then …`), and `tests/test_scripts.sh` pins it.
 - **Word-splitting a cron schedule also globs it.** Every field can be a literal `*`, so an unquoted split expands against the working directory — `/config` for a scheduled job — and the schedule silently matches nothing. `claude-cron`'s `safe_split` disables globbing around every split for exactly this; a test asserts it from a non-empty directory.
 - **`state-lib.sh` is sourced, never executed.** Like `login-url-lib.sh`, it is absent from `setup_commands` and checked separately in `ci/smoke.sh`. Consumers are *copied* to `/usr/local/bin`, so they look for it beside `$0` **and** in `/opt/scripts` — a `dirname "$0"` lookup alone breaks the installed copy.
-- **Never let a non-essential step kill startup.** `set -e` is on, so intentional non-zero returns must be captured (`ensure_native_claude_usable || native_usable=$?`), not left bare.
+- **Never let a non-essential step kill startup.** `set -e` is on, so intentional non-zero returns must be captured (`ensure_native_claude_usable || native_usable=$?`), not left bare. Since bashio 0.18 (base image, 2026-10-02) bashio also sets `inherit_errexit`, so a bare `x=$(bashio::config …)` exits the whole boot when the Supervisor API read fails — read survivable options through `config_or` or add `|| x=…`.
 - **No custom session UI.** tmux `new-session -A` handles reconnects; Claude Code's own `-c`/`-r` handle continue/resume.
 
 ### Options → consumers
@@ -169,7 +169,7 @@ podman exec test-claude-dev chmod +x /opt/scripts/welcome.sh
 podman stop test-claude-dev && podman rm test-claude-dev
 ```
 
-Outside a real Supervisor, `bashio::config` falls back to defaults and Supervisor-API steps (HA context, MCP, `SUPERVISOR_TOKEN`) no-op — don't read their absence as a bug. Run `claude-doctor` inside the terminal for environment/network diagnostics.
+Outside a real Supervisor, `bashio::config` returns an **empty string** (not the default) and Supervisor-API steps (HA context, MCP, `SUPERVISOR_TOKEN`) no-op — don't read their absence as a bug. Run `claude-doctor` inside the terminal for environment/network diagnostics.
 
 ## Important Constraints
 

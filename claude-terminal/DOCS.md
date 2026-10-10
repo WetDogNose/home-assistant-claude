@@ -48,7 +48,7 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `notify_tts_target` | `""` | A `media_player` entity to speak notifications on as well as showing them. Empty keeps them silent. |
 | `enable_ha_entities` | `true` | Publish the add-on's own state (busy, last run, sign-in needed) as Home Assistant entities, so dashboards and automations can see Claude rather than only call it. |
 | `enable_ha_mcp` | `true` | Register the [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) MCP server so Claude can control Home Assistant directly. |
-| `ha_mcp_version` | `"8.3.0"` | ha-mcp release to run. |
+| `ha_mcp_version` | `"8.6.0"` | ha-mcp release to run. |
 | `enable_automation_api` | `true` | Enable the HTTP Automation API daemon (port 8128) to trigger Claude non-interactively from HA automations. |
 | `automation_api_port` | `8128` | Container port for the Automation API server. |
 | `automation_api_key` | `""` | Optional static API key. If empty, a random 32-character token is auto-generated in `/data/automation_api_token`. |
