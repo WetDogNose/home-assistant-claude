@@ -13,7 +13,20 @@ Before submitting PRs or tagging releases, run the comprehensive local validatio
 # Run unit test suites directly
 ./tests/test_scripts.sh
 python3 -m unittest discover tests/
+
+# Against a built image: contents, then an actual boot
+./ci/smoke.sh local/claude-terminal:test          # add --exec on the native architecture
+./ci/boot-test.sh local/claude-terminal:test
 ```
+
+`ci/smoke.sh` and `ci/boot-test.sh` call `docker`; with Podman, alias it or
+install `podman-docker`. `shellcheck` is not in the Nix dev shell, so step 1 of
+`local-validate.sh` needs it installed separately.
+
+Adding a script to `scripts/`, a skill to `skills/`, a blueprint to
+`blueprints/` or a required binary means updating the lists in `ci/smoke.sh`.
+Adding an option means a label in `translations/en.yaml` and a row in
+`claude-terminal/DOCS.md`; `ci/check-docs-drift.sh` fails otherwise.
 
 ## Local Container Testing
 
@@ -69,7 +82,7 @@ podman stop test-claude-dev && podman rm test-claude-dev
 
 # Start new container with changes
 podman run -d --name test-claude-dev -p 7681:7681 \
-  -v /tmp/test-config:/config local/claude-terminal:test
+  -v /tmp/test-config:/config -v /tmp/test-data:/data local/claude-terminal:test
 
 # Test changes
 open http://localhost:7681
@@ -139,6 +152,42 @@ curl -s -X POST http://localhost:8128/api/prompt \
   -H "X-API-Key: ${TOKEN}" \
   -d '{"prompt": "echo Automation API working!"}'
 ```
+
+#### OpenCode Testing
+
+OpenCode is on by default, so the test container already has window 2
+(`Ctrl-b 2`). Outside a Supervisor there is no `SUPERVISOR_TOKEN`, so ha-mcp is
+not registered for it and the Home Assistant read allowances are absent from
+the policy; that is expected.
+
+```bash
+# Both config layers the add-on owns were written at boot
+podman exec test-claude-dev jq .permission /etc/opencode/opencode.json
+podman exec test-claude-dev cat /run/claude-terminal/opencode-defaults.json
+
+# The same policy, as exported to every OpenCode start path
+podman exec test-claude-dev opencode-layers policy
+
+# Point it at a model on the host (host.containers.internal is Podman's name
+# for the host; "localhost" inside the container is the container)
+podman exec test-claude-dev opencode-config set-provider ollama \
+  --base-url http://host.containers.internal:11434/v1 --model qwen2.5-coder:7b
+podman exec test-claude-dev opencode-config test ollama
+podman exec test-claude-dev opencode-config validate
+
+# Everything the doctor knows about OpenCode and the bridge
+podman exec test-claude-dev claude-doctor
+```
+
+The Claude → OpenCode bridge (`opencode-mcp`) is installed by `provision_async`
+after boot and needs network access once; watch the log for
+`OpenCode MCP bridge ... registered`. To hot-reload a layer change, copy
+`opencode-layers.sh` to **both** `/opt/scripts/` and `/usr/local/bin/opencode-layers`
+(the installed copy is what runs), then `opencode-config mcp sync`.
+
+The layer logic itself is unit-tested without a container: `tests/test_scripts.sh`
+redirects every path through `OPENCODE_USER_CONFIG_DIR`, `OPENCODE_RUN_DIR` and
+`OPENCODE_ENFORCED_FILE`.
 
 ### Debugging Techniques
 
@@ -220,7 +269,8 @@ wait
 sudo lsof -ti:7681 | xargs kill -9
 
 # Or use different port
-podman run -d --name test-claude-dev -p 7682:7681 -v /tmp/test-config:/config local/claude-terminal:test
+podman run -d --name test-claude-dev -p 7682:7681 \
+  -v /tmp/test-config:/config -v /tmp/test-data:/data local/claude-terminal:test
 ```
 
 #### Volume Mount Issues
@@ -250,8 +300,8 @@ podman image prune
 # Stop and remove test containers
 podman stop test-claude-dev && podman rm test-claude-dev
 
-# Remove test configurations
-rm -rf /tmp/test-config*
+# Remove test configurations and data
+rm -rf /tmp/test-config* /tmp/test-data
 
 # Clean up test images
 podman rmi local/claude-terminal:test
@@ -271,20 +321,21 @@ podman volume prune
 
 ## Production Deployment
 
-A deployable release requires:
-1. Bumping `version:` in `claude-terminal/config.yaml`.
-2. Adding a matching `## <version>` section in `claude-terminal/CHANGELOG.md`.
-3. Pushing a tag `v<version>` (`release.yml` and `publish-images.yml` are tag-driven).
+A deployable release requires, together:
+1. The code change.
+2. Bumping `version:` in `claude-terminal/config.yaml`.
+3. Adding a matching `## <version>` section in `claude-terminal/CHANGELOG.md`.
+4. Pushing a tag `v<version>` (`release.yml` and `publish-images.yml` are tag-driven).
+
+`main` is protected, so 1–3 go through a pull request. Merging ships nothing;
+the tag does. The full procedure, including how to confirm the image is
+pullable, is in [README.md → Releasing](README.md#releasing).
 
 ```bash
-# 1. Commit changes
-git add .
-git commit -m "feat(claude-terminal): description of changes"
-git push origin main
-
-# 2. Tag and push release (triggers GHCR image build & GitHub release)
-git tag v2.5.1-wdn.5
-git push origin v2.5.1-wdn.5
+# After the PR is merged — this block contains a checkout and leaves you on main
+git checkout main && git pull &&
+git tag v2.5.1-wdn.25 &&
+git push origin v2.5.1-wdn.25
 ```
 
 ## Advanced Testing

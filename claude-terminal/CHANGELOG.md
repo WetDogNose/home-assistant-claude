@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.5.1-wdn.25
+
+A small OpenCode fix and a documentation catch-up. Nothing to do after
+updating.
+
+- **A task Claude hands to OpenCode now sees changes made by
+  `opencode-config mcp sync` straight away.** The OpenCode that runs in the
+  background for Claude read its settings once and kept them, so a newly
+  shared MCP server did not reach it until the add-on restarted. `mcp sync`
+  now stops it, and it starts again with the new settings the next time
+  Claude uses it. Window 2 is not touched; restart OpenCode there yourself as
+  before.
+- **Your own mirrored permission rules survive a restart.** This only matters
+  if you installed a script at `~/.local/bin/opencode-allowlist-sync` to copy
+  Claude's allowed commands into OpenCode's permissions. The add-on rebuilt
+  OpenCode's permission file on every start and every `mcp sync`, which wiped
+  those rules until the next Claude session put them back, and OpenCode asked
+  about commands you had already allowed. The add-on now runs that script
+  itself after rebuilding the file. If the script fails or takes longer than
+  150 seconds, the add-on's normal permissions stay in place and a warning is
+  logged. The add-on does not ship such a script and nothing changes if you
+  do not have one.
+- **The documentation explains how Claude and OpenCode work together**: what
+  they share, how Claude hands work over, and who is asked to approve a
+  change in each case. See "How Claude and OpenCode fit together" on the
+  Documentation tab. The READMEs and the security policy were also brought up
+  to date.
+
 ## 2.5.1-wdn.24
 
 Security fixes from a review of the whole add-on. Update if you use OpenCode,

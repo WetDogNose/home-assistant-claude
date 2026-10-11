@@ -5,9 +5,10 @@
 ### Claude Code in a browser terminal, inside Home Assistant
 
 Write automations, debug YAML and control your instance in plain language —
-without leaving the Home Assistant sidebar.
+without leaving the Home Assistant sidebar. [OpenCode](https://opencode.ai/)
+runs beside it as a second agent, on any model you point it at.
 
-![Version](https://img.shields.io/badge/version-2.5.1--wdn.14-d97757?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.1--wdn.25-d97757?style=for-the-badge)
 ![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-2b5b84?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-4c9a5a?style=for-the-badge)
 ![Ingress](https://img.shields.io/badge/ingress-enabled-1a1b26?style=for-the-badge)
@@ -29,7 +30,11 @@ without leaving the Home Assistant sidebar.
 |  | Feature |
 |:--:|---|
 | 🖥️ | **Just Claude Code** — opens straight into Claude, no menus in the way |
-| 🤖 | **Automation API & Blueprint** — call Claude non-interactively from Home Assistant automations via secure HTTP endpoint or HA blueprint |
+| 🧩 | **OpenCode as a second agent** — in window 2 of the same terminal, on a local model, a gateway or any API endpoint; Claude can set it up and hand work to it. See [Two agents, one terminal](#two-agents-one-terminal) |
+| 🤖 | **Automation API & Blueprints** — call Claude from Home Assistant automations over an authenticated HTTP endpoint, synchronously or as a background job; four blueprints ship with it |
+| 🔔 | **Notifications** — Home Assistant tells you when Claude finishes a long task or stops to ask you something, optionally spoken |
+| 📡 | **Entities** — `binary_sensor.claude_terminal_busy`, `sensor.opencode_status` and friends, for dashboards and automations |
+| 📱 | **Usable from a phone** — a touch key bar adds Esc, Tab, Ctrl and the cursor keys that software keyboards lack |
 | 📊 | **Dashboard Generator** — `ha-dashboard` generates Lovelace YAML dashboards by area/domain |
 | 🕸️ | **Mesh & Battery Inspector** — `ha-mesh` scans Zigbee/Z-Wave/Matter signal quality and low batteries |
 | 🐍 | **PyScript & Integration Scaffolding** — `ha-scaffold` generates custom components or PyScript Python automations |
@@ -39,7 +44,9 @@ without leaving the Home Assistant sidebar.
 | 🕒 | **Git Time-Machine** — `ha-git-backups` commits `/config` with 1-click `rollback` functionality |
 | 🛡️ | **YAML Guardrails & Validation** — `ha-validate` checks config and auto-restores backups on syntax error |
 | 📷 | **Camera Vision** — `ha-snapshot` captures camera frames for Claude visual analysis |
-| ⏰ | **Autonomous Scheduler** — `claude-cron` runs periodic background prompts and posts HA notifications |
+| ⏰ | **Autonomous Scheduler** — `claude-cron` runs prompts on a cron schedule, `daily 07:00` or `every 30m`, and posts HA notifications |
+| 🪟 | **Several sessions** — `claude-session` runs more than one Claude at once; `claude-usage` reports token use |
+| 📚 | **Built-in skills** — Claude already knows how to use every command above, so you can ask for the outcome |
 | ⌨️ | **Quick-Bar & Diagnostics** — `ha-diagnose` for system health; `Ctrl+B h` popup menu for fast actions |
 | 🏠 | **Knows your setup** — version, entities and apps are summarised for Claude automatically |
 | 🔌 | **Controls Home Assistant** — bundled [ha-mcp](https://github.com/homeassistant-ai/ha-mcp) server for natural-language device and automation control |
@@ -92,14 +99,77 @@ full reference lives in **[DOCS.md](claude-terminal/DOCS.md)**.
 | `auto_launch_claude` | `true` | Start Claude on open, or drop to a shell |
 | `claude_auto_update` | `true` | Keep Claude Code current in the background |
 | `claude_version` | `""` | Pin to `stable`, `latest` or `X.Y.Z` |
-| `dangerously_skip_permissions` | `false` | ⚠️ Removes the confirmation step |
+| `dangerously_skip_permissions` | `false` | ⚠️ Removes the confirmation step, for Claude **and** OpenCode |
 | `claude_extra_args` | `""` | Extra flags for every launch |
-| `ha_smart_context` | `true` | Summarise your HA setup for Claude |
-| `enable_ha_mcp` | `true` | Let Claude control Home Assistant |
+| `enable_opencode` | `true` | OpenCode as a second agent in window 2 |
+| `opencode_ha_tool_search` | `true` | Give OpenCode a search tool for Home Assistant instead of ~80 tools; about 70% smaller requests |
+| `enable_opencode_mcp` | `true` | Let Claude hand work to OpenCode (third-party bridge, pinned by `opencode_mcp_version`) |
+| `ha_smart_context` | `true` | Summarise your HA setup for both agents |
+| `enable_ha_mcp` | `true` | Let the agents control Home Assistant |
 | `ha_mcp_version` | `8.6.0` | Which ha-mcp release backs that connection |
+| `notify_on_completion` | `true` | Notify when a long task finishes or Claude is waiting |
+| `enable_ha_entities` | `true` | Publish busy / status / last-run entities |
+| `enable_automation_api` | `true` | HTTP API for automations, port 8128, container network only |
+| `require_ingress_user` | `false` | Restrict the terminal to signed-in users; read the security notes first |
 | `git_user_name` / `git_user_email` | `""` | Commit identity for git |
 | `persistent_apk_packages` | `[]` | apk packages reinstalled each boot |
 | `persistent_pip_packages` | `[]` | pip packages reinstalled each boot |
+
+These are the ones most people touch. All 29 are in the
+[options table](claude-terminal/DOCS.md#options).
+
+---
+
+## Two agents, one terminal
+
+Claude Code and OpenCode are separate programs sharing one tmux session. Each
+has its own sign-in, settings, conversations and model. `Ctrl-b 1` is Claude,
+`Ctrl-b 2` is OpenCode.
+
+```mermaid
+flowchart LR
+    B[Browser<br/>HA sidebar] --> T[ttyd + tmux]
+    T --> C[Window 1<br/>Claude Code]
+    T --> O[Window 2<br/>OpenCode]
+    C -- "opencode-config<br/>(writes settings)" --> CFG[(OpenCode<br/>settings)]
+    C -- "opencode_* tools" --> BR[opencode-mcp<br/>bridge]
+    BR --> S[opencode serve<br/>background, loopback only]
+    CFG -.-> O
+    CFG -.-> S
+    C --> A((Anthropic))
+    O --> P((Your provider<br/>Ollama, gateway, ...))
+    S --> P
+    C --> HA[ha-mcp]
+    O --> HA
+    S --> HA
+    HA --> H((Home Assistant))
+```
+
+Everything that connects them runs from Claude to OpenCode:
+
+- **Claude sets OpenCode up.** Ask "point OpenCode at my Ollama server" and
+  Claude runs `opencode-config`. API keys go in on stdin and are stored in
+  their own files, never in the config or on a command line.
+- **Claude's MCP servers are passed on** to OpenCode at start, and again with
+  `opencode-config mcp sync`. A server from `/config/.mcp.json` is passed on
+  only once you have approved it in Claude.
+- **Claude hands work over** through the `opencode_*` tools. The bridge
+  starts a background `opencode serve` on first use, separate from window 2,
+  listening inside the container only, and stops it when the Claude session
+  ends.
+
+OpenCode has no tool for calling Claude.
+
+**Permissions are the add-on's, not OpenCode's.** OpenCode's own default is to
+allow everything. The add-on writes a settings file that outranks yours: ask
+before editing, running a command, fetching from the web or calling an MCP
+tool; reading and searching do not ask. In window 2 you answer. On a task
+handed over by Claude, Claude answers, after you approved the hand-over.
+OpenCode also ignores any `opencode.json` or `.opencode/` in `/config`, because
+it would run what it found there without asking.
+
+The full walk-through, including where each settings file lives, is in
+**[DOCS.md → OpenCode](claude-terminal/DOCS.md#opencode)**.
 
 ---
 
@@ -108,15 +178,19 @@ full reference lives in **[DOCS.md](claude-terminal/DOCS.md)**.
 > [!CAUTION]
 > **This app is powerful by design.** It runs as root, has read-write access
 > to `/config`, `/addon_configs` and `/share`, and with MCP enabled can control
-> devices and rewrite automations.
+> devices and rewrite automations. That applies to both agents.
 
 `dangerously_skip_permissions` removes the last human checkpoint. With it on, a
 misunderstanding — or a prompt injection hidden in any file, issue or web page
 Claude reads — can change your configuration or actuate devices without asking.
-Leave it off unless you accept that trade-off.
+Leave it off unless you accept that trade-off. It applies to OpenCode too.
+
+Any signed-in Home Assistant user can open the terminal unless you set
+`require_ingress_user`; hiding the sidebar entry is not access control.
 
 Full notes, including where credentials are stored and what lands in backups,
-are in **[DOCS.md](claude-terminal/DOCS.md#security-notes)**.
+are in **[DOCS.md](claude-terminal/DOCS.md#security-notes)**. To report a
+vulnerability, see **[SECURITY.md](SECURITY.md)**.
 
 ---
 
@@ -187,7 +261,9 @@ required checks must pass.
 >
 > ```bash
 > git diff --name-only $(git describe --tags --abbrev=0)..main -- \
->   claude-terminal/Dockerfile claude-terminal/run.sh claude-terminal/scripts/
+>   claude-terminal/Dockerfile claude-terminal/run.sh claude-terminal/scripts/ \
+>   claude-terminal/skills/ claude-terminal/opencode/ claude-terminal/web/ \
+>   claude-terminal/blueprints/
 > ```
 >
 > Non-empty means tag. Empty means reload the store and you are done.
@@ -270,7 +346,9 @@ All credit for the original add-on belongs there.
 
 This fork exists so the images Home Assistant pulls are built from source you
 can inspect here — the add-on runs as root with broad access, so it is worth
-controlling what actually ships. Both projects are MIT licensed.
+controlling what actually ships. It has since added features upstream does not
+have: OpenCode, the Automation API, notifications, entities and scheduled
+tasks among them. Both projects are MIT licensed.
 
 Original work © Tom Cassady and contributors. See **[LICENSE](LICENSE)**.
 

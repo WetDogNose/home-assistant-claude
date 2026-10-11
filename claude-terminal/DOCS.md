@@ -79,7 +79,7 @@ ha-validate     # validate HA configuration via API (--backup <file> before an e
 ha-dashboard    # generate Lovelace YAML dashboard by domain or area (<domain_or_area>)
 ha-mesh         # scan Zigbee, Z-Wave & Matter mesh network health and low batteries
 ha-memory       # search HA historical event and state transitions (<entity_id> [hours])
-ha-snapshot     # capture camera image for Claude vision inspection (<camera_entity>)
+ha-snapshot     # capture camera image for Claude vision inspection (<camera_entity>); saved in /tmp/ha-snapshots
 ha-scaffold     # generate boilerplate for custom integration (<domain>) or PyScript (pyscript <name>)
 ha-git-backups  # git config time-machine backup and rollback (status|commit|rollback)
 ha-assist       # query HA Assist voice conversation pipeline (<prompt>)
@@ -98,6 +98,8 @@ data-gc         # show what is using space under /data; 'data-gc clean' prunes i
 ha-notify       # raise a Home Assistant notification (used by the add-on itself)
 persist-install apk htop   # install packages that survive restarts
 ha-context      # refresh the Home Assistant context file
+opencode        # start OpenCode, the second agent (it normally runs in window 2)
+opencode-config # point OpenCode at an API endpoint or local model (set-provider|set-model|test|mcp|show)
 ```
 
 ### Built-in skills
@@ -308,6 +310,84 @@ shows the keys for whichever window you are not in; on a phone, use the key bar'
 or `Ctrl-b h` for a menu. OpenCode starts when you press Enter in its window,
 so it uses no memory until you want it.
 
+### How Claude and OpenCode fit together
+
+They are two separate programs that happen to share a terminal. Each has its
+own sign-in, its own settings, its own conversations and its own model.
+Nothing you say to one is seen by the other unless Claude hands it over.
+
+```text
+ Browser (Home Assistant sidebar)
+    │
+  one terminal, two windows
+    │
+    ├─ window 1: Claude Code ───────────────────► Anthropic
+    │     │
+    │     ├─ opencode-config ··· writes OpenCode's settings
+    │     │
+    │     └─ opencode_* tools ·· hands a task over
+    │            │
+    │            ▼
+    │        the bridge ──► OpenCode, running in the background
+    │                              │
+    └─ window 2: OpenCode ─────────┴────────────► the provider you chose
+                                                  (Ollama, a gateway, ...)
+
+ Both can use: your files in /config, the ha-* commands,
+               the Home Assistant tools, the same MCP servers
+```
+
+**What they share.** Both work in `/config`, both can run every command in
+this document, both read the same generated summary of your system, and both
+have the Home Assistant tools. Each starts its own copy of the Home Assistant
+connection, so turning one agent off does not affect the other.
+
+**What they do not share.** Sign-ins and API keys, conversation history,
+permission answers, and settings. Claude's settings live in `~/.claude`;
+OpenCode's live in `/data/.config/opencode`.
+
+**Claude is in charge; OpenCode is not.** Everything that connects them runs
+from Claude to OpenCode:
+
+| Claude can | How | Needs |
+|---|---|---|
+| Set OpenCode up | Runs `opencode-config`, which edits OpenCode's settings file and stores keys | `enable_opencode` |
+| Pass its MCP servers on | Copied across when the add-on starts, and by `opencode-config mcp sync` | `enable_opencode` |
+| Hand OpenCode a task and read the answer | The `opencode_*` tools | `enable_opencode_mcp` |
+
+OpenCode has no tool for calling Claude, and Claude's link to OpenCode is
+never passed on to OpenCode, so it cannot call itself either.
+
+**What happens when Claude hands work over.** Say you ask Claude to "get
+OpenCode's view on this automation":
+
+1. Claude asks your approval to use an OpenCode tool, as it does for any tool.
+2. The bridge starts a copy of OpenCode in the background. This is not the
+   one in window 2; you will not see the work happen there, and window 2 does
+   not need to be open.
+3. That OpenCode sends the task to whichever provider and model you set up,
+   using the same settings and the same permission rules as window 2.
+4. If the task needs to edit a file, run a command or change something in
+   Home Assistant, OpenCode stops and asks. Claude answers. See
+   [the caveats](#letting-claude-hand-work-to-opencode).
+5. The result comes back to Claude, which carries on with it.
+
+The background copy only listens inside the add-on, starts on first use, and
+stops when that Claude session ends.
+
+**Who approves what.**
+
+| Where the work runs | Who is asked before a change |
+|---|---|
+| Claude, window 1 | You |
+| OpenCode, window 2 | You |
+| OpenCode, on a task from Claude | Claude, after you approved the hand-over |
+| Either, with `dangerously_skip_permissions` on | Nobody |
+
+**What you can see from Home Assistant.** Both agents report whether they
+are busy, waiting or finished as [entities](#opencode-as-home-assistant-entities),
+including while OpenCode is working on a task from Claude.
+
 ### Setting it up
 
 The easiest way is to ask Claude, in window 1:
@@ -355,7 +435,20 @@ Claude to), then run `opencode-config validate`.
 |---|---|---|
 | `/data/.config/opencode/opencode.json` | Your providers, models and extra MCP servers | You and Claude |
 | `/data/.config/opencode/secrets/` | API keys, one file each, readable by root only | `opencode-config` |
-| add-on managed, rebuilt every start | Home Assistant tools and context, language servers, shared MCP servers, permissions | The add-on |
+| `/run/claude-terminal/opencode-defaults.json` | Home Assistant tools and context, YAML checking, MCP servers passed on from Claude | The add-on, every start |
+| `/etc/opencode/opencode.json` | Permissions, the `review` agent, the switched-off language servers | The add-on, every start |
+
+OpenCode reads all three settings files and combines them in that order; where
+two set the same thing, the later one wins. That is why a permission rule in
+your own file cannot loosen the add-on's, and why the add-on never needs to
+edit your file. The two add-on files are outside `/data`, so they are rebuilt
+from the add-on's options on every start and are not in backups.
+
+Because the permissions file is rebuilt, hand edits to it do not last. If you
+keep a script of your own at `~/.local/bin/opencode-allowlist-sync` that adds
+rules to it, the add-on runs that script each time it rebuilds the file (on
+start and on `opencode-config mcp sync`), with a 150-second limit. The add-on
+does not ship one, and only that exact path is used.
 
 Your files are included in Home Assistant backups, keys included, the same as
 Claude's own sign-in. API keys are deliberately **not** add-on options: the
@@ -427,6 +520,10 @@ add-on:
 opencode-config mcp sync
 opencode-config mcp list        # each server, and where it came from
 ```
+
+`mcp sync` also stops the background OpenCode that Claude hands work to, so
+Claude's next hand-over uses the new list. OpenCode in window 2 keeps the old
+one until you restart it there (`/exit`, then `opencode`).
 
 A server only OpenCode should have:
 
@@ -746,7 +843,8 @@ Read this before signing in — it grants real access.
 - **OpenCode says it has no provider or no models**: nothing is configured yet. Ask Claude to set it up, or see [OpenCode](#opencode). `opencode-config test <id>` tells you whether the endpoint is reachable and whether the key was accepted.
 - **OpenCode cannot reach a model on my PC**: `localhost` inside the add-on is the add-on. Use the PC's LAN address, and check the model server listens on that address rather than only on its own loopback.
 - **A change to OpenCode's configuration did nothing**: it is read at start. `/exit` in window 2 and run `opencode` again. An `opencode.json` or `.opencode/` folder in `/config` is ignored on purpose — see [Where the configuration lives](#where-the-configuration-lives).
-- **OpenCode asks before every Home Assistant tool call**: that is the add-on's permission policy. Choose "always" in the prompt to stop being asked for that tool in the current session.
+- **OpenCode asks before every Home Assistant tool call**: that is the add-on's permission policy for anything that changes or deletes something. Reading does not ask while `opencode_ha_tool_search` is on; with it off, or with `ha_mcp_version` set to a release newer than this add-on knows, every call asks. Choose "always" in the prompt to stop being asked for that tool in the current session.
+- **A task Claude handed to OpenCode fails or never answers**: OpenCode needs a working provider first, so check `opencode-config test <id>`. The task runs in the background, not in window 2, so nothing appears there; `sensor.opencode_status` shows whether it is running or waiting.
 - **Window 2 is missing**: `enable_opencode` is off, or the session was created before you turned it on. Restart the add-on.
 - **Claude has no `opencode_*` tools**: run `claude-doctor`; its OpenCode section says whether the bridge is installed and registered. It is installed in the background on first start and needs internet access once.
 - **The `claude_terminal_*` entities are missing**: they vanish whenever Home Assistant Core restarts, because states created through the REST API are not persisted by Core. The add-on republishes them every five minutes — wait, or restart the add-on to publish immediately. If they never appear, check `enable_ha_entities` is on and run `ha-entity sync` in the terminal to see the error.
@@ -765,10 +863,12 @@ The Claude Terminal add-on is the work of
 [heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons).
 All credit for the original add-on belongs there.
 
-This fork changes only how the add-on is built and distributed: images are
-built by this repository's CI and published to `ghcr.io/wetdognose`, so what
-Home Assistant runs is built from source you can inspect. Both projects are
-MIT licensed; original work © Tom Cassady and contributors.
+This fork began as a change to how the add-on is built and distributed: images
+are built by this repository's CI and published to `ghcr.io/wetdognose`, so
+what Home Assistant runs is built from source you can inspect. It has since
+added features upstream does not have, including OpenCode, the Automation
+API, notifications, entities and scheduled tasks. Both projects are MIT
+licensed; original work © Tom Cassady and contributors.
 
 Report problems with **this fork** at
 <https://github.com/WetDogNose/home-assistant-claude/issues>, not upstream —

@@ -60,11 +60,11 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
    `setup_opencode` (right after `setup_commands`, which installs `opencode-layers`) — write OpenCode's two config layers, export the `OPENCODE_*` environment ttyd will inherit, background `update_opencode`
 3. `install_skills` — resync `/opt/skills/` into `$HOME/.claude/skills/`; `install_hooks` — rewrite the managed hook block in `$HOME/.claude/settings.json`
 4. `update_claude` — validate/repair the persistent native install, then background install/update into `/data`
-5. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`)
+5. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`); runs inside `provision_async`, not on the boot path
 6. `configure_git` — sets global commit identity, configures `gh auth setup-git` if GitHub credentials exist
 7. `start_automation_api` — auto-generates `/data/automation_api_token` if empty and launches background HTTP daemon (`claude-api-server.py`) on port 8128
-8. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
-9. `start_entity_heartbeat` — publishes the add-on's own entities and re-publishes every 5 min; `start_context_refresh` — periodic `ha-context`; `notify_ingress_advisory` — one-time security notice
+8. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API (inside `provision_async`)
+9. `start_login_notifier`, `start_claude_cron` — background watchers for the sign-in URL and scheduled prompts; `start_entity_heartbeat` — publishes the add-on's own entities and re-publishes every 5 min; `start_context_refresh` — periodic `ha-context`; `notify_ingress_advisory` — one-time security notice; `install_blueprint` — bundled blueprints, once each
 10. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`; `setup_opencode_mcp` — installs and registers the `opencode-mcp` bridge the same way (both inside `provision_async`)
 11. `start_web_terminal` — `exec ttyd ... terminal-session 'claude-launch [flags]'` (or `'welcome --shell'` when `auto_launch_claude: false`). `terminal-session` creates the tmux session — window 1 Claude, window 2 `opencode-launch --wait` when OpenCode is enabled — on the first connection and attaches on every later one
 
@@ -117,6 +117,8 @@ All options are read via `bashio::config` (from `/data/options.json`):
 | Option | Read by |
 |---|---|
 | `auto_launch_claude` | `get_claude_launch_command` |
+| `tmux_mouse` | `configure_tmux` |
+| `require_ingress_user` | `notify_ingress_advisory`, `start_web_terminal` (fails closed: unreadable means required) |
 | `claude_auto_update` | `update_claude` |
 | `claude_version` | `claude_version_pin` → `update_claude` |
 | `dangerously_skip_permissions`, `claude_extra_args` | `build_claude_flags` & `claude-api-server.py`; `dangerously_skip_permissions` also `setup_opencode` → `opencode-layers` |
@@ -170,7 +172,7 @@ This repo is a fork of [heytcass/home-assistant-addons](https://github.com/heytc
 
 A deployable change needs, together: the code change, a bumped `version:` in `claude-terminal/config.yaml`, a matching `## <version>` section in `claude-terminal/CHANGELOG.md`, and a pushed `v<version>` tag — the tag is what both publishes the image and cuts the release. Pushing to `main` alone ships nothing.
 
-Keep `claude-terminal/DOCS.md` (the options table and troubleshooting shown in the HA UI) in sync when options or user-facing behavior change. Note the root `DOCS.md` is an older, diverged copy.
+Keep `claude-terminal/DOCS.md` (the options table and troubleshooting shown in the HA UI) in sync when options or user-facing behavior change. The root `DOCS.md` is only a pointer to it. Options are also summarised in the root `README.md` (a subset) and in `claude-terminal/README.md` (all of them), and the root README carries a version badge — none of the three is checked by `ci/check-docs-drift.sh`, which is how they fell ten releases behind. How Claude and OpenCode interact is explained for users in DOCS.md under "How Claude and OpenCode fit together"; update it when the bridge, the layers or the approval model change.
 
 ## Local Container Testing
 
