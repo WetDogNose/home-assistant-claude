@@ -335,8 +335,12 @@ A local address has to be reachable from the add-on's container. `localhost`
 there is the add-on itself, not your PC or the Home Assistant host, so use the
 machine's LAN address.
 
-If you change a provider's base URL to a different host, its stored key and
-headers are dropped rather than sent to the new address; supply them again.
+Whenever you give a provider a new address, pipe its key in with the same
+command. If you don't, the add-on sets a placeholder key and drops the old key
+and headers, so that nothing you stored or signed in with earlier is sent to
+the new address. That is what you want for a server that needs no key, such as
+Ollama. A provider you signed in to with OAuth inside OpenCode cannot be given
+a new address at all until you sign it out.
 
 `opencode-config` covers base URL, key, headers and models. For anything else
 OpenCode supports — Azure resource names, Bedrock regions, per-model context

@@ -1484,43 +1484,63 @@ printf 'sk-real-key' | "$OC_CONFIG" set-provider moved --base-url https://good.e
 oc_assert "a path change on the same host keeps the key" \
     jq -e '.provider.moved.options | has("apiKey") and has("headers")' "$OC_USER"
 "$OC_CONFIG" set-provider moved --base-url https://attacker.example.net/v1 >/dev/null
-oc_assert "moving a provider to another host drops its key and headers" \
-    jq -e '.provider.moved.options | (has("apiKey") | not) and (has("headers") | not)' "$OC_USER"
+oc_assert "moving a provider to another host replaces its key with a placeholder and drops its headers" \
+    jq -e '.provider.moved.options | .apiKey == "no-key-configured" and (has("headers") | not)' "$OC_USER"
+oc_refute "the old address's key file is removed with it" test -e "$OPENCODE_USER_CONFIG_DIR/secrets/moved"
 printf 'sk-new' | "$OC_CONFIG" set-provider moved --base-url https://third.example.org/v1 --api-key-stdin >/dev/null
-oc_assert "a key supplied with the move is kept" jq -e '.provider.moved.options | has("apiKey")' "$OC_USER"
+oc_assert "a key supplied with the move is used instead of the placeholder" \
+    jq -e '.provider.moved.options.apiKey | startswith("{file:")' "$OC_USER"
 
-# The guard must fail CLOSED. A built-in provider has a key and no baseURL --
-# it talks to its vendor by default -- so "compare with the old URL" had
-# nothing to compare and let the key travel to whatever address was given.
+# The guard must fail CLOSED, and must not depend on finding the credentials.
+# OpenCode attaches a key from three places -- this config, its own sign-in
+# store, and the provider's environment variable -- to whatever baseURL the
+# config names. Reproduced against the binary: a repointed provider received
+# the environment key. An explicit apiKey in the config overrides the other
+# two, so a new or changed address with no key piped in gets a placeholder.
 printf 'sk-vendor-key' | "$OC_CONFIG" set-provider openrouter --builtin --api-key-stdin >/dev/null
 "$OC_CONFIG" set-provider openrouter --base-url https://attacker.example.net/v1 >/dev/null
-oc_assert "giving a built-in provider a base URL drops its stored key" \
-    jq -e '.provider.openrouter.options | (has("apiKey") | not) and .baseURL == "https://attacker.example.net/v1"' "$OC_USER"
+oc_assert "a built-in provider (key, no base URL) loses its key when given an address" \
+    jq -e '.provider.openrouter.options | .apiKey == "no-key-configured" and .baseURL == "https://attacker.example.net/v1"' "$OC_USER"
+# No key anywhere this command can see -- which is exactly when one may be
+# sitting in the environment or the sign-in store.
+"$OC_CONFIG" set-provider groq --builtin --base-url https://attacker.example.net/v1 >/dev/null
+oc_assert "a provider with no visible key still gets the placeholder" \
+    jq -e '.provider.groq.options.apiKey == "no-key-configured"' "$OC_USER"
+"$OC_CONFIG" set-provider brandnew --base-url http://192.168.1.20:11434/v1 >/dev/null
+oc_assert "so does a brand-new provider, whose id may match a built-in one" \
+    jq -e '.provider.brandnew.options.apiKey == "no-key-configured"' "$OC_USER"
+oc_refute "the placeholder is not empty (empty may read as no key configured)" \
+    jq -e '.provider.brandnew.options.apiKey == ""' "$OC_USER"
+
 "$OC_CONFIG" set-provider casey --base-url https://Good.Example.com/v1 --header X-A=1 >/dev/null
-"$OC_CONFIG" set-provider casey --base-url https://good.example.com/v2 >/dev/null
+"$OC_CONFIG" set-provider casey --base-url https://good.example.com/v2 --header X-A=1 >/dev/null
+"$OC_CONFIG" set-provider casey --base-url https://GOOD.example.com/v3 >/dev/null
 oc_assert "a host differing only in case is the same host" jq -e '.provider.casey.options | has("headers")' "$OC_USER"
 "$OC_CONFIG" set-provider casey --base-url https://good.example.com@attacker.example.net/v1 >/dev/null
 oc_assert "a userinfo prefix does not make another host look the same" \
     jq -e '.provider.casey.options | has("headers") | not' "$OC_USER"
 
-# A key saved by OpenCode's own sign-in lives in auth.json, not in the config
-# this command edits, so it cannot be dropped -- and OpenCode would attach it
-# to requests for the new address. The move is refused instead.
+# An OAuth sign-in authenticates through the provider's own request hook, so
+# the placeholder cannot be relied on to displace it. Refused outright.
 export OPENCODE_AUTH_FILE="$OC_DIR/auth.json"
-echo '{"groq": {"type": "api", "key": "sk-signed-in"}}' > "$OPENCODE_AUTH_FILE"
+echo '{"copilot": {"type": "oauth", "refresh": "r", "access": "a"}, "plain": {"type": "api", "key": "sk-signed-in"}}' > "$OPENCODE_AUTH_FILE"
 cp "$OC_USER" "$OC_DIR/before-auth.json"
-oc_refute "a provider signed in through OpenCode cannot be repointed" \
-    "$OC_CONFIG" set-provider groq --builtin --base-url https://attacker.example.net/v1
-oc_assert "the refused move changed nothing" cmp -s "$OC_USER" "$OC_DIR/before-auth.json"
-oc_assert "it can be repointed when a key for the new endpoint is supplied" \
-    sh -c "printf 'sk-new' | '$OC_CONFIG' set-provider groq --builtin --base-url https://gw.example.com/v1 --api-key-stdin"
-cp "$OC_USER" "$OC_DIR/before-auth.json"
-oc_refute "a provider keyed by its environment variable cannot be repointed" \
-    env MY_LAB_API_KEY=sk-env "$OC_CONFIG" set-provider my-lab --base-url https://attacker.example.net/v1
-oc_assert "that refused move changed nothing either" cmp -s "$OC_USER" "$OC_DIR/before-auth.json"
-oc_assert "an unrelated provider is not affected by another's sign-in" \
-    "$OC_CONFIG" set-provider fresh --base-url https://fresh.example.com/v1
+oc_refute "a provider signed in with OAuth cannot be repointed" \
+    "$OC_CONFIG" set-provider copilot --builtin --base-url https://attacker.example.net/v1
+oc_refute "not even with a key supplied" \
+    sh -c "printf 'sk-x' | '$OC_CONFIG' set-provider copilot --builtin --base-url https://attacker.example.net/v1 --api-key-stdin"
+oc_assert "the refused moves changed nothing" cmp -s "$OC_USER" "$OC_DIR/before-auth.json"
+oc_refute "and left no key file behind" test -e "$OPENCODE_USER_CONFIG_DIR/secrets/copilot"
+"$OC_CONFIG" set-provider plain --builtin --base-url https://gw.example.com/v1 >/dev/null
+oc_assert "a provider signed in with a plain key is repointed with the placeholder" \
+    jq -e '.provider.plain.options.apiKey == "no-key-configured"' "$OC_USER"
 unset OPENCODE_AUTH_FILE
+
+# --api-key-env let the caller name ANY environment variable as the key and
+# pair it with any address: a general way to send a secret somewhere.
+oc_refute "--api-key-env is gone" \
+    env MY_PROVIDER_KEY=x "$OC_CONFIG" set-provider envkey --base-url https://x.example.com/v1 --api-key-env MY_PROVIDER_KEY
+oc_refute "and wrote nothing" jq -e '.provider | has("envkey")' "$OC_USER"
 
 # OpenCode expands references in EVERY field, not only the ones meant for
 # secrets. Each value the command accepts is checked, one assertion per field.
@@ -1541,8 +1561,6 @@ oc_refute "no reference from a refused command reached the config" \
 
 oc_refute "the Supervisor token cannot be named as an API key" \
     "$OC_CONFIG" set-provider tok --base-url https://x.example.com/v1 --api-key-env SUPERVISOR_TOKEN
-oc_assert "an ordinary variable can" \
-    "$OC_CONFIG" set-provider envkey --base-url https://x.example.com/v1 --api-key-env MY_PROVIDER_KEY
 # OpenCode expands references wherever they appear, so a header of
 # {env:SUPERVISOR_TOKEN} is the Home Assistant token sent to that provider.
 oc_refute "a header may not carry an {env:} reference" \

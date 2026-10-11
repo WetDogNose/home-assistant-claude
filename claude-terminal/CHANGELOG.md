@@ -7,20 +7,19 @@ OpenCode. Update if you use OpenCode with an API key.
 
 - **A provider's key could still follow it to a new address.** 2.5.1-wdn.20
   dropped a stored key when a provider's base URL moved to a different host,
-  but only if a base URL had been set before. A built-in provider such as
-  OpenRouter has a key and no base URL, so giving it one kept the key. The key
-  and headers are now dropped whenever the new address is not provably the
-  one they were stored for.
+  but missed built-in providers, and keys OpenCode holds outside its config
+  file (its own sign-in, or an environment variable). Now, giving a provider
+  a new address without piping in a key for it sets a placeholder key, which
+  OpenCode uses in place of anything it had. A provider signed in with OAuth
+  cannot be given a new address until it is signed out.
+- **`--api-key-env` is removed** from `opencode-config`. It allowed any
+  environment variable to be named as the key for any address. Pipe keys in
+  with `--api-key-stdin`.
 - **`{env:...}` and `{file:...}` are refused in every value, not just
   headers.** OpenCode expands them wherever they appear, so a base URL, model
   name, MCP URL or MCP command containing one could read a secret, including
-  the add-on's Home Assistant token, and send it out. Only the API key options
+  the add-on's Home Assistant token, and send it out. Only `--api-key-stdin`
   can create a reference now.
-- **A provider you signed in to inside OpenCode cannot be silently repointed.**
-  A key saved by OpenCode's own sign-in, or taken from the provider's
-  `<NAME>_API_KEY` environment variable, is not in the file `opencode-config`
-  edits, so it cannot be dropped. Changing that provider's address is now
-  refused unless you supply the key for the new endpoint in the same command.
 - MCP server URLs added with `opencode-config mcp add --url` must be http(s).
 
 ## 2.5.1-wdn.20
