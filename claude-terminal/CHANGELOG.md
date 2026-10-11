@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.5.1-wdn.23
+
+OpenCode was sending about 82,000 tokens with every request before your prompt
+was even counted. Most of it was the description of every Home Assistant tool.
+
+- **OpenCode now gets a search tool for Home Assistant instead of all 80 or so
+  tools at once** (`opencode_ha_tool_search`, on by default). It can still do
+  everything it could before; it looks the tool up when it needs it. This
+  removes roughly 70% of each request. Turn the option off if your model has
+  trouble finding tools.
+- **Reading from Home Assistant no longer asks for approval in OpenCode**
+  while that option is on. Anything that changes or deletes something still
+  asks, every time.
+- **A new `review` agent in OpenCode with no Home Assistant tools**, for
+  reviewing changes, searching files and running checks. Press `Tab` in window
+  2 to switch to it, or have Claude pick it when it hands work over. It has
+  the same permissions as the normal agent.
+- If you wrote your own permission rules naming individual Home Assistant
+  tools, they stop matching while tool search is on. Calls that change
+  something go back to asking.
+
 ## 2.5.1-wdn.22
 
 - **The bar at the bottom of the terminal now says how to switch agents.** The

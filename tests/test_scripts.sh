@@ -1288,7 +1288,38 @@ OC_SKIP_PERMISSIONS="yes" run_layers write
 oc_assert "anything but an explicit true keeps the prompts" jq -e 'has("permission")' "$OPENCODE_ENFORCED_FILE"
 OC_SKIP_PERMISSIONS="true" run_layers write
 oc_assert "dangerously_skip_permissions removes the prompts" \
-jq -e '(has("permission") | not) and (has("agent") | not) and .autoupdate == false' "$OPENCODE_ENFORCED_FILE"
+jq -e '(has("permission") | not) and (.agent | keys == ["review"]) and .autoupdate == false' "$OPENCODE_ENFORCED_FILE"
+# The lean agent exists to keep the Home Assistant tool definitions out of the
+# request, which has nothing to do with prompting.
+oc_assert "the review agent still has no Home Assistant tools without prompts" \
+    jq -e '.agent.review.permission == {"home-assistant_*": "deny"}' "$OPENCODE_ENFORCED_FILE"
+
+# With ha-mcp's tool search on, almost every Home Assistant call goes through
+# one of three proxies. ha-mcp admits to the read proxy only tools annotated
+# read-only (and the enumerated read actions of a `manage` tool), so that one
+# may run unprompted; the write and delete proxies reach everything else.
+run_layers write
+oc_assert "Home Assistant tool search and the read proxy do not ask" \
+    jq -e '.permission["home-assistant_ha_search_tools"] == "allow" and .permission["home-assistant_ha_call_read_tool"] == "allow"' "$OPENCODE_ENFORCED_FILE"
+oc_assert "the Home Assistant write and delete proxies ask" \
+    jq -e '.permission["home-assistant_ha_call_write_tool"] == "ask" and .permission["home-assistant_ha_call_delete_tool"] == "ask"' "$OPENCODE_ENFORCED_FILE"
+# A wildcard allow here would cover ha_call_write_tool, and with it every
+# write ha-mcp has.
+oc_assert "no Home Assistant tool is allowed by wildcard" \
+    jq -e '[.permission | to_entries[] | select(.value == "allow") | .key | select(test("[*?]"))] == []' "$OPENCODE_ENFORCED_FILE"
+oc_assert "the only Home Assistant tools allowed are ones that read" \
+    jq -e '[.permission | to_entries[] | select(.value == "allow") | .key | select(startswith("home-assistant_")) | ltrimstr("home-assistant_")] | sort
+           == ["ha_call_read_tool", "ha_config_get_automation", "ha_get_overview", "ha_get_skill_guide", "ha_search", "ha_search_tools"]' "$OPENCODE_ENFORCED_FILE"
+
+# The review agent: build's policy, minus the Home Assistant tools. OpenCode
+# leaves a tool out of the request only when the LAST rule matching it is a
+# deny, so the deny has to come after everything it overrides.
+oc_assert "the review agent denies every Home Assistant tool, as its last rule" \
+    jq -e '.agent.review.permission | (to_entries | last) == {key: "home-assistant_*", value: "deny"}' "$OPENCODE_ENFORCED_FILE"
+oc_assert "the review agent is otherwise exactly as permissive as build" \
+    jq -e '(.agent.review.permission | del(.["home-assistant_*"])) == .agent.build.permission' "$OPENCODE_ENFORCED_FILE"
+oc_assert "the review agent can be selected as a primary agent" \
+    jq -e '.agent.review.mode == "primary" and (.agent.review.description | length > 0)' "$OPENCODE_ENFORCED_FILE"
 
 # Several built-in language servers load code from the project directory --
 # the TypeScript one runs node_modules/typescript/lib/tsserver.js -- and
@@ -1323,6 +1354,17 @@ oc_assert "the HA context file is loaded through instructions" \
 oc_assert "the YAML server is routed through the wrapper with HA tags" \
     jq -e '.lsp["yaml-ls"].command == ["opencode-yaml-ls"] and (.lsp["yaml-ls"].initialization.yaml.customTags | index("!secret scalar") != null)' "$OC_DEFAULTS"
 oc_assert "the defaults layer is mode 600" test "$(file_mode "$OC_DEFAULTS")" = "-rw-------"
+# 78 tool definitions are about 70,000 tokens on every request; tool search
+# replaces them with a search tool, three proxies and a handful of pinned tools.
+oc_assert "ha-mcp runs in tool-search mode by default" \
+    jq -e '.mcp["home-assistant"].environment.ENABLE_TOOL_SEARCH == "true"' "$OC_DEFAULTS"
+OC_HA_MCP=true OC_HA_TOOL_SEARCH=false run_layers write
+oc_assert "opencode_ha_tool_search off leaves ha-mcp's full tool list" \
+    jq -e '.mcp["home-assistant"].environment | has("ENABLE_TOOL_SEARCH") | not' "$OC_DEFAULTS"
+OC_HA_MCP=true OC_HA_TOOL_SEARCH=false run_layers write
+run_layers resync
+oc_assert "resync remembers that tool search was turned off" \
+    jq -e '.mcp["home-assistant"].environment | has("ENABLE_TOOL_SEARCH") | not' "$OC_DEFAULTS"
 
 OC_HA_MCP=false OC_HA_CONTEXT=false OC_LSP=false run_layers write
 oc_assert "each default follows its option" \

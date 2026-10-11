@@ -733,6 +733,7 @@ setup_opencode() {
     OC_SKIP_PERMISSIONS="$skip" \
     OC_HA_MCP="$ha_mcp" \
     OC_HA_MCP_VERSION="$(config_or 'ha_mcp_version' '8.6.0')" \
+    OC_HA_TOOL_SEARCH="$(config_or 'opencode_ha_tool_search' 'true')" \
     OC_HA_CONTEXT="$ha_context" \
     OC_LSP="$(config_or 'opencode_lsp' 'true')" \
     OC_SHARE_CLAUDE_MCP="true" \

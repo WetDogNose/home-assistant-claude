@@ -43,6 +43,8 @@
 #   OC_SKIP_PERMISSIONS  true = omit the permission block (allow by default)
 #   OC_HA_MCP            true = register the Home Assistant MCP server
 #   OC_HA_MCP_VERSION    ha-mcp version to run
+#   OC_HA_TOOL_SEARCH    true = run ha-mcp in tool-search mode (a search tool
+#                        and three call proxies instead of every tool)
 #   OC_HA_CONTEXT        true = load the generated HA context file
 #   OC_LSP               true = configure language servers
 #   OC_SHARE_CLAUDE_MCP  true = copy Claude Code's MCP servers across
@@ -206,12 +208,41 @@ translate_claude_mcp() {
 # fetches and every MCP tool -- including the Home Assistant ones, which can
 # switch devices and restart Core -- running unprompted. Order matters:
 # OpenCode applies the LAST matching rule, so the catch-all comes first.
+#
+# The Home Assistant entries are for ha-mcp's tool-search mode, where nearly
+# every call goes through a proxy instead of a tool of its own. ha-mcp admits
+# to ha_call_read_tool only tools annotated read-only, plus the enumerated
+# read actions of a `manage` tool, and fails closed on anything else (checked
+# in transforms/categorized_search.py, 8.6.0) -- so it is allowed, along with
+# the search tool and the pinned tools that only read. The write and delete
+# proxies reach every other tool ha-mcp has, and are spelled out as "ask" so
+# that nobody widens them with a wildcard: `home-assistant_ha_call_*` would.
+# With tool search off these names match nothing and every Home Assistant
+# tool falls to the catch-all. **When bumping ha-mcp, re-check what the read
+# proxy admits.**
 POLICY_FILTER='
     {"*": "ask",
      read: "allow", glob: "allow", grep: "allow", list: "allow", lsp: "allow",
      todoread: "allow", todowrite: "allow", skill: "allow", task: "allow",
      question: "allow",
+     "home-assistant_ha_search_tools": "allow",
+     "home-assistant_ha_call_read_tool": "allow",
+     "home-assistant_ha_search": "allow",
+     "home-assistant_ha_get_overview": "allow",
+     "home-assistant_ha_config_get_automation": "allow",
+     "home-assistant_ha_get_skill_guide": "allow",
+     "home-assistant_ha_call_write_tool": "ask",
+     "home-assistant_ha_call_delete_tool": "ask",
      edit: "ask", bash: "ask", external_directory: "ask"}'
+
+# The `review` agent: `build` without the Home Assistant tools. Their
+# definitions are most of what OpenCode sends on every request, and reviewing
+# a diff or searching code needs none of them. OpenCode leaves a tool out of
+# the request when the LAST rule matching it is a deny, so this is appended
+# after the policy -- which also means the agent can never be more permissive
+# than `build`.
+REVIEW_DENY='{"home-assistant_*": "deny"}'
+REVIEW_DESCRIPTION="Lean agent with no Home Assistant tools, for reviewing diffs, searching code and running checks. Far fewer tokens per request than build."
 
 # Every language server OpenCode ships, except yaml-ls (which the defaults
 # layer replaces with the add-on's own wrapper).
@@ -252,29 +283,37 @@ build_enforced() {
     # lsp: with the option off this must be the literal `false`. An object,
     # even one that only disables servers, turns the built-ins it does not
     # name back ON.
-    jq -n --arg skip "$skip" --arg lsp "$lsp" --argjson builtin "$BUILTIN_LSP" "
+    #
+    # review is written even without prompts: keeping tool definitions out of
+    # the request is not a permission setting.
+    jq -n --arg skip "$skip" --arg lsp "$lsp" --argjson builtin "$BUILTIN_LSP" \
+        --argjson review_deny "$REVIEW_DENY" --arg review_description "$REVIEW_DESCRIPTION" "
         (${POLICY_FILTER}) as \$policy
+        | {description: \$review_description, mode: \"primary\"} as \$review
         | {\"\$schema\": \"https://opencode.ai/config.json\", autoupdate: false,
            formatter: false,
            lsp: (if \$lsp == \"true\"
                  then (\$builtin | map({key: ., value: {disabled: true}}) | from_entries)
                  else false end)}
-        + (if \$skip == \"true\" then {}
+        + (if \$skip == \"true\"
+           then {agent: {review: (\$review + {permission: \$review_deny})}}
            else {permission: \$policy,
                  agent: {build: {permission: \$policy},
                          plan: {permission: \$policy},
                          general: {permission: \$policy},
-                         explore: {permission: \$policy}}} end)"
+                         explore: {permission: \$policy},
+                         review: (\$review + {permission: (\$policy + \$review_deny)})}} end)"
 }
 
 build_defaults() {
-    local ha_mcp="$1" ha_mcp_version="$2" ha_context="$3" lsp="$4" shared="$5"
+    local ha_mcp="$1" ha_mcp_version="$2" ha_context="$3" lsp="$4" shared="$5" tool_search="${6:-true}"
     jq -n \
         --arg ha_mcp "$ha_mcp" \
         --arg version "$ha_mcp_version" \
         --arg ha_context "$ha_context" \
         --arg context_file "$HA_CONTEXT_FILE" \
         --arg lsp "$lsp" \
+        --arg tool_search "$tool_search" \
         --argjson shared "$shared" '
         {"$schema": "https://opencode.ai/config.json"}
         + (if $ha_context == "true" then {instructions: [$context_file]} else {} end)
@@ -308,12 +347,17 @@ build_defaults() {
                     type: "local",
                     command: ["uvx", "--python", "3.13", "--index-strategy",
                               "unsafe-best-match", "ha-mcp@\($version)"],
-                    environment: {
+                    environment: ({
                         HOMEASSISTANT_URL: "http://supervisor/core",
                         # A reference, resolved by OpenCode at start: the token
                         # itself is never written to disk here.
                         HOMEASSISTANT_TOKEN: "{env:SUPERVISOR_TOKEN}"
-                    },
+                    }
+                    # ha-mcp otherwise lists every tool it has -- about
+                    # 70,000 tokens of definitions on every request. This
+                    # leaves a search tool, three call proxies and a few
+                    # pinned tools; the rest stay reachable through them.
+                    + (if $tool_search == "true" then {ENABLE_TOOL_SEARCH: "true"} else {} end)),
                     enabled: true
                  }} else {} end)
           )}
@@ -329,6 +373,7 @@ record_inputs() {
         printf 'OC_SKIP_PERMISSIONS=%s\n' "$OC_SKIP_PERMISSIONS"
         printf 'OC_HA_MCP=%s\n' "$OC_HA_MCP"
         printf 'OC_HA_MCP_VERSION=%s\n' "$OC_HA_MCP_VERSION"
+        printf 'OC_HA_TOOL_SEARCH=%s\n' "$OC_HA_TOOL_SEARCH"
         printf 'OC_HA_CONTEXT=%s\n' "$OC_HA_CONTEXT"
         printf 'OC_LSP=%s\n' "$OC_LSP"
         printf 'OC_SHARE_CLAUDE_MCP=%s\n' "$OC_SHARE_CLAUDE_MCP"
@@ -344,6 +389,7 @@ load_recorded() {
             OC_SKIP_PERMISSIONS) OC_SKIP_PERMISSIONS="$value" ;;
             OC_HA_MCP)           OC_HA_MCP="$value" ;;
             OC_HA_MCP_VERSION)   OC_HA_MCP_VERSION="$value" ;;
+            OC_HA_TOOL_SEARCH)   OC_HA_TOOL_SEARCH="$value" ;;
             OC_HA_CONTEXT)       OC_HA_CONTEXT="$value" ;;
             OC_LSP)              OC_LSP="$value" ;;
             OC_SHARE_CLAUDE_MCP) OC_SHARE_CLAUDE_MCP="$value" ;;
@@ -355,6 +401,9 @@ normalise_inputs() {
     OC_SKIP_PERMISSIONS="${OC_SKIP_PERMISSIONS:-false}"
     OC_HA_MCP="${OC_HA_MCP:-false}"
     OC_HA_CONTEXT="${OC_HA_CONTEXT:-false}"
+    # On unless explicitly turned off: this is a cost setting, not a safety
+    # one, and the permission policy is the same either way.
+    [ "${OC_HA_TOOL_SEARCH:-}" = "false" ] || OC_HA_TOOL_SEARCH="true"
     OC_LSP="${OC_LSP:-false}"
     OC_SHARE_CLAUDE_MCP="${OC_SHARE_CLAUDE_MCP:-true}"
     OC_HA_MCP_VERSION="${OC_HA_MCP_VERSION:-$DEFAULT_HA_MCP_VERSION}"
@@ -405,7 +454,7 @@ write_layers() {
 
     # 600: servers shared from Claude Code can carry credentials in their
     # environment or headers.
-    if defaults=$(build_defaults "$OC_HA_MCP" "$OC_HA_MCP_VERSION" "$OC_HA_CONTEXT" "$OC_LSP" "$shared") \
+    if defaults=$(build_defaults "$OC_HA_MCP" "$OC_HA_MCP_VERSION" "$OC_HA_CONTEXT" "$OC_LSP" "$shared" "$OC_HA_TOOL_SEARCH") \
         && printf '%s\n' "$defaults" | write_atomic "$DEFAULTS_FILE" 600; then
         :
     else

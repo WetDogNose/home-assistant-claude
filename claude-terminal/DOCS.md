@@ -44,6 +44,7 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `enable_opencode` | `true` | Add [OpenCode](https://opencode.ai/) as a second agent in window 2 of the terminal. See [OpenCode](#opencode). |
 | `opencode_auto_update` | `true` | Refresh OpenCode in the background on every start. A new build only replaces the current one after it has been seen to run. |
 | `opencode_version` | `""` | Empty tracks the newest release; an exact `X.Y.Z` pins it. |
+| `opencode_ha_tool_search` | `true` | Give OpenCode a search tool for Home Assistant instead of every Home Assistant tool at once. Cuts the size of each request by roughly 70%. See [Keeping OpenCode's requests small](#keeping-opencodes-requests-small). |
 | `opencode_lsp` | `true` | YAML checking inside OpenCode, set up to understand `!secret` and `!include`. An extra process while OpenCode runs. |
 | `enable_opencode_mcp` | `true` | Give Claude tools for handing work to OpenCode. Uses the third-party `opencode-mcp` package; see [the caveats](#letting-claude-hand-work-to-opencode). |
 | `opencode_mcp_version` | `"3.0.0"` | Exact version of that package to install. Never updated automatically. |
@@ -364,7 +365,8 @@ fields it anticipated.
 **Permissions are set by the add-on.** OpenCode asks before it edits a file,
 runs a command, fetches from the web or calls an MCP tool — including the Home
 Assistant tools, which can switch devices. Reading and searching files does not
-ask. Turning on `dangerously_skip_permissions` removes the prompts for both
+ask, and neither does reading from Home Assistant when
+`opencode_ha_tool_search` is on. Turning on `dangerously_skip_permissions` removes the prompts for both
 agents. The add-on applies this to OpenCode's built-in agents; a custom agent
 you define yourself in `/data/.config/opencode` can carry its own permissions,
 so treat that directory as you would the add-on's options.
@@ -381,6 +383,34 @@ switches that off. Keep OpenCode settings in `/data/.config/opencode`.
 The same things Claude does: the generated Home Assistant context
 (`ha_smart_context`), the Home Assistant MCP tools (`enable_ha_mcp`) and the
 bundled skills. All the `ha-*` commands are on its PATH.
+
+### Keeping OpenCode's requests small
+
+Every request OpenCode makes carries the description of every tool it could
+use. The Home Assistant connection has about 80 tools, and their descriptions
+alone were roughly 70,000 tokens, sent again with each message. On a local
+model that is most of the context window and most of the waiting; on a paid
+one it is most of the bill.
+
+Two things keep that down:
+
+- **`opencode_ha_tool_search`** (on by default). OpenCode gets a handful of
+  Home Assistant tools: a search, a few that are always useful, and three that
+  run whatever the search finds — one for reading, one for changing, one for
+  deleting. Everything Home Assistant could do before, it can still do.
+  Reading does not ask for approval; changing and deleting always do. Turn the
+  option off if your model struggles to find the tool it needs, and each tool
+  goes back to being listed and approved by name.
+- **The `review` agent.** An agent with no Home Assistant tools at all, for
+  work that does not need them: reading a diff, searching the configuration,
+  running a check. In window 2, press `Tab` to switch to it. Its permissions
+  are the same as the normal agent's. When Claude hands work to OpenCode it can
+  choose this agent too.
+
+If you added permission rules of your own that name individual Home Assistant
+tools, they no longer match while tool search is on, because those tools are
+now reached through the three shared ones. Calls that change something fall
+back to asking.
 
 ### MCP servers
 
