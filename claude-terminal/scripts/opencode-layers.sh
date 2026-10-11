@@ -5,8 +5,15 @@
 #
 #   ~/.config/opencode/opencode.json   the USER layer (Claude and the user edit it)
 #   $OPENCODE_CONFIG                    the DEFAULTS layer   <- written here
-#   <project>/opencode.json             optional, the user's
 #   /etc/opencode/opencode.json         the ENFORCED layer   <- written here
+#
+# OpenCode would also read a PROJECT layer from the working directory
+# (opencode.json and a .opencode/ directory). The add-on turns that off with
+# OPENCODE_DISABLE_PROJECT_CONFIG, and it has to stay off: the working
+# directory is /config, where files arrive from git clones, HACS, backups and
+# shares, and OpenCode executes what it finds there without asking -- a
+# .opencode/plugins/*.js is run as root at startup, an `mcp` entry's command
+# is launched, and an agent definition can grant itself `bash: allow`.
 #
 # The add-on needs to contribute settings without ever rewriting the user's
 # file -- the same constraint as claude-hooks and settings.json -- and OpenCode's
@@ -19,10 +26,9 @@
 #   defaults   things the add-on provides and the user may override: the
 #              Home Assistant MCP server, the HA context file, language servers,
 #              and the MCP servers shared from Claude Code.
-#   enforced   things that must not be overridable: permissions. The terminal's
-#              working directory is /config, and a project opencode.json there
-#              outranks the defaults layer -- so an agent could otherwise turn
-#              off its own confirmation prompts by writing one file.
+#   enforced   things that must not be overridable: permissions, for the
+#              built-in agents as well as globally, because an agent-level
+#              permission block outranks the global one.
 #
 # Runs at boot (from run.sh) and again from `opencode-config mcp sync` inside
 # the user's terminal -- plain bash, no bashio.
@@ -51,6 +57,7 @@ SHARED_REPORT="${OPENCODE_SHARED_REPORT:-${RUN_DIR}/opencode-mcp-shared.json}"
 CLAUDE_JSON="${CLAUDE_JSON:-${HOME}/.claude.json}"
 CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-/config}"
 CLAUDE_PROJECT_MCP="${CLAUDE_PROJECT_MCP:-${CLAUDE_PROJECT_DIR}/.mcp.json}"
+CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-${HOME}/.claude/settings.json}"
 HA_CONTEXT_FILE="${HA_CONTEXT_FILE:-${HOME}/.claude/CLAUDE.md}"
 
 DEFAULT_HA_MCP_VERSION="8.6.0"
@@ -87,7 +94,19 @@ read_scope() {
 
 # Translate Claude Code's MCP servers into OpenCode's shape.
 #
-# Emits {"servers": {...}, "skipped": [...]}. Two names are never copied:
+# Emits {"servers": {...}, "skipped": [...], "unapproved": [...]}.
+#
+# /config/.mcp.json is NOT trusted on its own. It is a file in the project
+# directory, and an entry in it is a command to run (or a URL to send headers
+# to, which after the ${VAR} rewrite below could include the Supervisor
+# token). Claude Code will not start a project-scope server until the user
+# has approved it, and records that approval in files under $HOME -- which
+# /config cannot write. A server is shared only when that approval exists, so
+# sharing never grants a project file more trust than Claude Code already
+# gave it. A settings file inside the project is deliberately not consulted:
+# it could approve itself.
+#
+# Two names are never copied:
 #   opencode        the bridge that lets Claude drive OpenCode. Copying it would
 #                   have OpenCode calling itself.
 #   home-assistant  the add-on writes its own entry, which references the
@@ -100,10 +119,20 @@ translate_claude_mcp() {
     local_scope=$(read_scope "$CLAUDE_JSON" '.projects[$dir].mcpServers')
     project_scope=$(read_scope "$CLAUDE_PROJECT_MCP" '.mcpServers')
 
+    # The user's approvals of project-scope servers, from the two places
+    # Claude Code keeps them. Unreadable means "nothing approved".
+    local approvals_state approvals_settings
+    approvals_state=$(read_scope "$CLAUDE_JSON" '.projects[$dir]
+        | {enabledMcpjsonServers, disabledMcpjsonServers, enableAllProjectMcpServers}')
+    approvals_settings=$(read_scope "$CLAUDE_SETTINGS" \
+        '{enabledMcpjsonServers, disabledMcpjsonServers, enableAllProjectMcpServers}')
+
     jq -nc \
         --argjson user "$user_scope" \
         --argjson local "$local_scope" \
-        --argjson project "$project_scope" '
+        --argjson project_all "$project_scope" \
+        --argjson a1 "$approvals_state" \
+        --argjson a2 "$approvals_settings" '
         # Claude Code expands ${VAR} in .mcp.json; OpenCode spells it {env:VAR}.
         def envrefs:
             walk(if type == "string"
@@ -120,8 +149,17 @@ translate_claude_mcp() {
                 + (if (.env | type) == "object" then {environment: .env} else {} end)
                 + {enabled: true}
             else null end;
-        ($user + $local + $project) as $all
-        | reduce ($all | to_entries[]) as $e ({servers: {}, skipped: []};
+        def names($k): [$a1, $a2 | .[$k] | if type == "array" then .[] else empty end];
+        (names("enabledMcpjsonServers")) as $enabled
+        | (names("disabledMcpjsonServers")) as $disabled
+        | ($a1.enableAllProjectMcpServers == true or $a2.enableAllProjectMcpServers == true) as $all_enabled
+        | ($project_all | with_entries(select(
+              .key as $k
+              | ($disabled | index($k)) == null
+                and ($all_enabled or ($enabled | index($k)) != null)))) as $project
+        | ([$project_all | keys[] | select(. as $k | $project | has($k) | not)]) as $unapproved
+        | ($user + $local + $project) as $all
+        | reduce ($all | to_entries[]) as $e ({servers: {}, skipped: [], unapproved: $unapproved};
             if $e.key == "opencode" or $e.key == "home-assistant" then .
             else ($e.value | if type == "object" then translate else null end) as $t
                 | if $t == null then .skipped += [$e.key]
@@ -133,10 +171,29 @@ build_enforced() {
     local skip="$1"
     # Fail SAFE: only an explicit "true" removes the prompts. An option that
     # could not be read arrives here as anything else and keeps them.
+    #
+    # The policy is "ask, except for tools that only read". OpenCode's own
+    # default allows everything, and gating only edit and bash would still
+    # leave web fetches and every MCP tool -- including the Home Assistant
+    # ones, which can switch devices and restart Core -- running unprompted.
+    # Order matters: OpenCode applies the LAST matching rule, so the catch-all
+    # comes first.
+    #
+    # It is repeated under each built-in agent because an agent-level
+    # permission block outranks the global one; without that, a `build` agent
+    # redefined in the user layer would shed the policy.
     jq -n --arg skip "$skip" '
-        {"$schema": "https://opencode.ai/config.json", autoupdate: false}
+        {"*": "ask",
+         read: "allow", glob: "allow", grep: "allow", list: "allow", lsp: "allow",
+         todoread: "allow", todowrite: "allow", skill: "allow", task: "allow",
+         question: "allow",
+         edit: "ask", bash: "ask", external_directory: "ask"} as $policy
+        | {"$schema": "https://opencode.ai/config.json", autoupdate: false}
         + (if $skip == "true" then {}
-           else {permission: {edit: "ask", bash: "ask"}} end)'
+           else {permission: $policy,
+                 agent: {build: {permission: $policy},
+                         plan: {permission: $policy},
+                         general: {permission: $policy}}} end)'
 }
 
 build_defaults() {
@@ -242,12 +299,13 @@ normalise_inputs() {
 # The caller treats them differently -- a missing defaults layer costs
 # features, a missing enforced layer costs the confirmation prompts.
 write_layers() {
-    local rc=0 translated shared='{}' skipped='[]' enforced defaults
+    local rc=0 translated shared='{}' skipped='[]' unapproved='[]' enforced defaults
 
     if [ "$OC_SHARE_CLAUDE_MCP" = "true" ]; then
         if translated=$(translate_claude_mcp) && [ -n "$translated" ]; then
             shared=$(printf '%s' "$translated" | jq -c '.servers')
             skipped=$(printf '%s' "$translated" | jq -c '.skipped')
+            unapproved=$(printf '%s' "$translated" | jq -c '.unapproved')
         else
             warn "could not read Claude Code's MCP servers; none are shared"
         fi
@@ -255,6 +313,10 @@ write_layers() {
 
     if [ "$skipped" != "[]" ]; then
         warn "not shared (no OpenCode equivalent): $(printf '%s' "$skipped" | jq -r 'join(", ")')"
+    fi
+
+    if [ "$unapproved" != "[]" ]; then
+        warn "not shared (in ${CLAUDE_PROJECT_MCP} but not approved in Claude Code): $(printf '%s' "$unapproved" | jq -r 'join(", ")')"
     fi
 
     if enforced=$(build_enforced "$OC_SKIP_PERMISSIONS") \
@@ -276,8 +338,8 @@ write_layers() {
     fi
 
     # Names only -- claude-doctor and `opencode-config mcp list` read this.
-    jq -nc --argjson shared "$shared" --argjson skipped "$skipped" \
-        '{shared: ($shared | keys), skipped: $skipped}' \
+    jq -nc --argjson shared "$shared" --argjson skipped "$skipped" --argjson unapproved "$unapproved" \
+        '{shared: ($shared | keys), skipped: $skipped, unapproved: $unapproved}' \
         | write_atomic "$SHARED_REPORT" 644 || true
 
     return "$rc"

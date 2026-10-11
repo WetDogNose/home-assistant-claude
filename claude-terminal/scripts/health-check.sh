@@ -176,6 +176,9 @@ check_opencode() {
         local skipped
         skipped=$(jq -r '.skipped | join(", ")' "$report" 2>/dev/null || true)
         [ -n "$skipped" ] && bashio::log.warning "Not shared (no OpenCode equivalent): $skipped"
+        local unapproved
+        unapproved=$(jq -r '(.unapproved // []) | join(", ")' "$report" 2>/dev/null || true)
+        [ -n "$unapproved" ] && bashio::log.info "Not shared until approved in Claude Code (/config/.mcp.json): $unapproved"
     fi
 
     local bridge_enabled

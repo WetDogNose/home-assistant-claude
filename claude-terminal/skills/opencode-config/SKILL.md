@@ -18,14 +18,18 @@ OpenCode merges several files. Knowing which one you are editing explains most
 |---|---|---|
 | User | `/data/.config/opencode/opencode.json` | **You**, with `opencode-config` |
 | Defaults | `/run/claude-terminal/opencode-defaults.json` | the add-on, every boot |
-| Project | `/config/opencode.json` (optional) | the user |
 | Enforced | `/etc/opencode/opencode.json` | the add-on, every boot |
 
 - **Providers, API keys, models, extra MCP servers** go in the user layer.
-- **Permissions are enforced by the add-on** and cannot be changed from any
-  file. OpenCode asks before editing files or running commands unless the
-  add-on option `dangerously_skip_permissions` is on. If the user wants that
-  changed, it is an add-on option, not a config edit — tell them so.
+- **Permissions are enforced by the add-on.** OpenCode asks before editing
+  files, running commands, fetching from the web or calling an MCP tool,
+  unless the add-on option `dangerously_skip_permissions` is on. If the user
+  wants that changed, it is an add-on option, not a config edit — tell them so.
+  Do not work around it by defining a custom agent with looser permissions.
+- **Nothing in `/config` is read as OpenCode configuration.** An
+  `opencode.json` or `.opencode/` folder there is ignored on purpose, because
+  OpenCode would execute plugins and commands from it without asking. Do not
+  create them; put settings in the user layer.
 - The Home Assistant MCP server, the Home Assistant context file and the
   language servers come from the defaults layer. Do not copy them into the
   user layer.
@@ -124,8 +128,9 @@ window 2 (`/exit`) and start it again with `opencode`.
 ## MCP servers
 
 OpenCode automatically gets the MCP servers you have — every server from
-`claude mcp add` and from `/config/.mcp.json` is translated into OpenCode's
-format at boot. After adding or removing one of your own servers, refresh
+`claude mcp add` is translated into OpenCode's format at boot. A server from
+`/config/.mcp.json` is included only once the user has approved it in Claude
+Code; `mcp sync` lists any that are waiting for that. After adding or removing one of your own servers, refresh
 OpenCode's copy:
 
 ```bash

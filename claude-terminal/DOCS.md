@@ -346,7 +346,6 @@ Claude to), then run `opencode-config validate`.
 |---|---|---|
 | `/data/.config/opencode/opencode.json` | Your providers, models and extra MCP servers | You and Claude |
 | `/data/.config/opencode/secrets/` | API keys, one file each, readable by root only | `opencode-config` |
-| `/config/opencode.json` (optional) | Your own overrides for this Home Assistant config | You |
 | add-on managed, rebuilt every start | Home Assistant tools and context, language servers, shared MCP servers, permissions | The add-on |
 
 Your files are included in Home Assistant backups, keys included, the same as
@@ -354,11 +353,20 @@ Claude's own sign-in. API keys are deliberately **not** add-on options: the
 options file is plaintext and an options form could only offer the handful of
 fields it anticipated.
 
-**Permissions are set by the add-on and cannot be changed from a config file.**
-OpenCode asks before editing a file or running a command, unless you turn on
-`dangerously_skip_permissions`, which applies to both agents. This is enforced
-separately because the terminal works in `/config`, and without it an agent
-could switch off its own prompts by writing one file there.
+**Permissions are set by the add-on.** OpenCode asks before it edits a file,
+runs a command, fetches from the web or calls an MCP tool — including the Home
+Assistant tools, which can switch devices. Reading and searching files does not
+ask. Turning on `dangerously_skip_permissions` removes the prompts for both
+agents. The add-on applies this to OpenCode's built-in agents; a custom agent
+you define yourself in `/data/.config/opencode` can carry its own permissions,
+so treat that directory as you would the add-on's options.
+
+**OpenCode does not load configuration from `/config`.** Left to itself it
+would read an `opencode.json` and a `.opencode/` folder from the directory it
+works in, and run what it finds there without asking: plugins, MCP server
+commands, and agents with their own permissions. `/config` receives files from
+git repositories, HACS, restored backups and network shares, so the add-on
+switches that off. Keep OpenCode settings in `/data/.config/opencode`.
 
 ### What OpenCode knows about Home Assistant
 
@@ -368,9 +376,11 @@ bundled skills. All the `ha-*` commands are on its PATH.
 
 ### MCP servers
 
-Any MCP server you have given Claude — with `claude mcp add`, or in
-`/config/.mcp.json` — is passed on to OpenCode automatically when the add-on
-starts. After adding one, refresh OpenCode's copy without a restart of the
+Any MCP server you have given Claude with `claude mcp add` is passed on to
+OpenCode automatically when the add-on starts. A server listed in
+`/config/.mcp.json` is passed on only once you have approved it in Claude,
+which asks the first time it sees one; an entry nobody approved is never
+started. After adding one, refresh OpenCode's copy without a restart of the
 add-on:
 
 ```bash
@@ -689,7 +699,8 @@ Read this before signing in — it grants real access.
 - **Two notifications for every scheduled job**: an older `~/.claude/settings.json` with hand-copied hooks in it. The add-on only manages entries whose command begins with `claude-hooks handle`; remove any duplicates you added yourself.
 - **OpenCode says it has no provider or no models**: nothing is configured yet. Ask Claude to set it up, or see [OpenCode](#opencode). `opencode-config test <id>` tells you whether the endpoint is reachable and whether the key was accepted.
 - **OpenCode cannot reach a model on my PC**: `localhost` inside the add-on is the add-on. Use the PC's LAN address, and check the model server listens on that address rather than only on its own loopback.
-- **A change to OpenCode's configuration did nothing**: it is read at start. `/exit` in window 2 and run `opencode` again. If you changed permissions in a file, that cannot work — see [Where the configuration lives](#where-the-configuration-lives).
+- **A change to OpenCode's configuration did nothing**: it is read at start. `/exit` in window 2 and run `opencode` again. An `opencode.json` or `.opencode/` folder in `/config` is ignored on purpose — see [Where the configuration lives](#where-the-configuration-lives).
+- **OpenCode asks before every Home Assistant tool call**: that is the add-on's permission policy. Choose "always" in the prompt to stop being asked for that tool in the current session.
 - **Window 2 is missing**: `enable_opencode` is off, or the session was created before you turned it on. Restart the add-on.
 - **Claude has no `opencode_*` tools**: run `claude-doctor`; its OpenCode section says whether the bridge is installed and registered. It is installed in the background on first start and needs internet access once.
 - **The `claude_terminal_*` entities are missing**: they vanish whenever Home Assistant Core restarts, because states created through the REST API are not persisted by Core. The add-on republishes them every five minutes — wait, or restart the add-on to publish immediately. If they never appear, check `enable_ha_entities` is on and run `ha-entity sync` in the terminal to see the error.

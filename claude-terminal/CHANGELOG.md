@@ -13,13 +13,18 @@ OpenCode, as a second agent.
   run the new `opencode-config` command yourself. API keys are piped in and
   stored in their own root-only files; they are never add-on options and never
   written into the config file.
-- **OpenCode asks before editing files or running commands**, unlike its own
-  default. The add-on enforces this in a place a config file in `/config`
-  cannot override. `dangerously_skip_permissions` now applies to both agents.
+- **OpenCode asks before it changes anything**, unlike its own default: file
+  edits, commands, web fetches and MCP tool calls all prompt; reading does
+  not. `dangerously_skip_permissions` now applies to both agents.
+- **OpenCode ignores configuration found in `/config`.** By default it would
+  run plugins, MCP commands and agent definitions from the folder it works in
+  without asking, and `/config` receives files from many sources. Its settings
+  live in `/data/.config/opencode` only.
 - **It knows your Home Assistant** the way Claude does: the same generated
   context, the same Home Assistant MCP tools, the same bundled skills.
 - **MCP servers are shared.** Servers you have given Claude are passed on to
-  OpenCode at start, and `opencode-config mcp sync` refreshes them.
+  OpenCode at start, and `opencode-config mcp sync` refreshes them. A server
+  from `/config/.mcp.json` is shared only after you have approved it in Claude.
 - **Claude can hand work to OpenCode** through new `opencode_*` tools. This
   uses `opencode-mcp`, a third-party package pinned to an exact version
   (`opencode_mcp_version`). Read the caveats in the documentation, and turn

@@ -46,6 +46,24 @@ in an Alpine 3.23 container. What was found:
 | `opencode-mcp` installs at runtime with lifecycle scripts disabled | Confirmed on aarch64 |
 | Plugin event names and shapes | `session.status` carries `busy`, `idle` and also `retry`; `busy` repeats many times per turn; subagents are separate sessions |
 
+## Security review changes
+
+A review of the first commit found problems that the sections below predate.
+Where they disagree, this section is what shipped.
+
+- **Project config is disabled** (`OPENCODE_DISABLE_PROJECT_CONFIG=1`). With
+  it on, OpenCode ran `.opencode/plugins/*.js` from `/config` as root at
+  startup, launched `mcp` commands from a `/config/opencode.json`, and let an
+  agent file there grant itself `bash: allow` over the enforced layer. There is
+  no project layer in the shipped design; section 3's table has three rows.
+- **The enforced policy is "ask, except read-only tools"**, not only `edit`
+  and `bash`, and is repeated under the built-in agents. The original left web
+  fetches and all MCP tools, including Home Assistant's, unprompted.
+- **`/config/.mcp.json` servers are shared only when Claude Code has approved
+  them**, read from files under `$HOME` and failing closed.
+- **`opencode-config test`** refuses values that would inject a curl directive.
+- **`opencode-yaml-ls`** installs the YAML server with `--ignore-scripts`.
+
 ## 1. Binary
 
 Same three guards as Claude, because "installed" and "actually runs" are

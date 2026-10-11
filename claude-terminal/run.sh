@@ -704,6 +704,14 @@ setup_opencode() {
 
     export CLAUDE_TERMINAL_OPENCODE=1
     export OPENCODE_DISABLE_AUTOUPDATE=1
+    # Do NOT load config from the working directory. That directory is
+    # /config, and OpenCode executes what it finds there without asking: a
+    # .opencode/plugins/*.js runs as root at startup, an opencode.json `mcp`
+    # entry's command is launched, and an agent file can grant itself
+    # `bash: allow`, outranking the enforced layer. Files reach /config from
+    # git clones, HACS, restored backups and network shares. Removing this
+    # reopens all three.
+    export OPENCODE_DISABLE_PROJECT_CONFIG=1
     # The entity plugin lives in the image, not in /data: shipped state.
     export OPENCODE_CONFIG_DIR=/opt/opencode
 

@@ -36,7 +36,7 @@ if (!fs.existsSync(server)) {
     fs.mkdirSync(prefix, { recursive: true });
     const install = spawnSync(
         "npm",
-        ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", "yaml-language-server"],
+        ["install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", "yaml-language-server"],
         { stdio: ["ignore", "ignore", "inherit"], timeout: 180000 }
     );
     if (install.status !== 0 || !fs.existsSync(server)) {

@@ -368,7 +368,8 @@ cmd_mcp_sync() {
     opencode-layers resync || die "could not regenerate the add-on's OpenCode layers."
     if [ -s "$SHARED_REPORT" ]; then
         jq -r '"Shared from Claude Code: \(if (.shared | length) > 0 then (.shared | join(", ")) else "none" end)",
-               (if (.skipped | length) > 0 then "Not shared (no OpenCode equivalent): \(.skipped | join(", "))" else empty end)' \
+               (if (.skipped | length) > 0 then "Not shared (no OpenCode equivalent): \(.skipped | join(", "))" else empty end),
+               (if ((.unapproved // []) | length) > 0 then "Not shared (in /config/.mcp.json but not approved in Claude Code): \(.unapproved | join(", "))\n  Start Claude in /config and approve the server there first." else empty end)' \
             "$SHARED_REPORT"
     fi
     restart_note
@@ -443,6 +444,23 @@ cmd_test() {
 
     base_url=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
     [ -n "$base_url" ] || die "provider '${id}' has no baseURL in ${CONFIG_FILE}."
+    # Everything below is written into a curl config, where a newline starts a
+    # new directive (`output = ...` would be a file write) and a quote ends the
+    # value. These come from a file that may have been edited by hand, so
+    # refuse rather than escape and hope.
+    case "$base_url" in
+        http://*|https://*) ;;
+        *) die "provider '${id}' has a baseURL that is not http(s)." ;;
+    esac
+    if printf '%s' "$base_url" | grep -q '[[:cntrl:]"\\[:space:]]'; then
+        die "provider '${id}' has a baseURL containing quotes, backslashes, spaces or control characters."
+    fi
+    if printf '%s' "$current" | jq -e --arg id "$id" '
+        (.provider[$id].options.headers // {}) | to_entries
+        | any((.key | test("^[A-Za-z0-9-]+$") | not)
+              or (.value | tostring | test("[\\x00-\\x1f]")))' >/dev/null 2>&1; then
+        die "provider '${id}' has a header name or value that cannot be sent safely."
+    fi
     key_ref=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.apiKey // empty')
     key=$(resolve_secret "$key_ref")
 
@@ -452,6 +470,9 @@ cmd_test() {
     body=$(mktemp) || return 1
     # Backslash and double quote are the two characters curl's config syntax
     # treats specially inside a quoted value.
+    case "$key" in
+        *[[:cntrl:]]*) rm -f "$body"; die "the API key for '${id}' contains control characters." ;;
+    esac
     key_escaped=${key//\\/\\\\}
     key_escaped=${key_escaped//\"/\\\"}
     status=$({
