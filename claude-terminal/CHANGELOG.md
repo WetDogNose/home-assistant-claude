@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.5.1-wdn.21
+
+Security fixes for `opencode-config`, the command Claude uses to configure
+OpenCode. Update if you use OpenCode with an API key.
+
+- **A provider's key could still follow it to a new address.** 2.5.1-wdn.20
+  dropped a stored key when a provider's base URL moved to a different host,
+  but missed built-in providers, and keys OpenCode holds outside its config
+  file (its own sign-in, or an environment variable). Now, giving a provider
+  a new address without piping in a key for it sets a placeholder key, which
+  OpenCode uses in place of anything it had. A provider signed in with OAuth
+  cannot be given a new address until it is signed out.
+- **`--api-key-env` is removed** from `opencode-config`. It allowed any
+  environment variable to be named as the key for any address. Pipe keys in
+  with `--api-key-stdin`.
+- **`{env:...}` and `{file:...}` are refused in every value, not just
+  headers.** OpenCode expands them wherever they appear, so a base URL, model
+  name, MCP URL or MCP command containing one could read a secret, including
+  the add-on's Home Assistant token, and send it out. Only `--api-key-stdin`
+  can create a reference now.
+- MCP server URLs added with `opencode-config mcp add --url` must be http(s).
+
 ## 2.5.1-wdn.20
 
 OpenCode, as a second agent.

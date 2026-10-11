@@ -19,6 +19,14 @@ SECRETS_DIR="${CONFIG_DIR}/secrets"
 RUN_DIR="${OPENCODE_RUN_DIR:-/run/claude-terminal}"
 DEFAULTS_FILE="${OPENCODE_DEFAULTS_FILE:-${RUN_DIR}/opencode-defaults.json}"
 SHARED_REPORT="${OPENCODE_SHARED_REPORT:-${RUN_DIR}/opencode-mcp-shared.json}"
+# Where OpenCode keeps credentials entered through its own sign-in (/connect,
+# `opencode auth login`). Not this command's file, but it decides where those
+# credentials get sent, so the move guard has to know about it.
+AUTH_FILE="${OPENCODE_AUTH_FILE:-${XDG_DATA_HOME:-${HOME}/.local/share}/opencode/auth.json}"
+# Written as a provider's apiKey when its address is set without a key; see
+# cmd_set_provider. Deliberately not empty: an empty value may be treated as
+# "no key configured" and let another credential source back in.
+PLACEHOLDER_KEY="no-key-configured"
 EMPTY_CONFIG='{"$schema":"https://opencode.ai/config.json"}'
 
 show_help() {
@@ -50,7 +58,6 @@ set-provider options:
   --header K=V         Extra request header (repeatable)
   --api-key-stdin      Read the API key from standard input and store it in a
                        separate file with 600 permissions
-  --api-key-env <VAR>  Read the API key from an environment variable at run time
 
 API keys are never accepted as arguments: they would land in shell history and
 in the process list.
@@ -88,10 +95,12 @@ reserved_env() {
 }
 
 # OpenCode expands {env:NAME} and {file:PATH} wherever they appear in its
-# config. In a header or an MCP environment value that turns "store this text"
-# into "read this secret and send it" -- a header of {env:SUPERVISOR_TOKEN} on
-# a provider is the Home Assistant token delivered to that provider. API keys
-# have their own flags; nothing else needs a reference.
+# config -- not only in the fields meant for secrets. That turns "store this
+# text" into "read this secret and send it": a header of
+# {env:SUPERVISOR_TOKEN} is the Home Assistant token delivered to that
+# provider, and so is a base URL of https://host/{env:SUPERVISOR_TOKEN}/v1.
+# EVERY value this command accepts from its caller goes through here; the only
+# way to create a reference is --api-key-stdin, which builds it itself. Checking a subset of the fields was the bug.
 reject_reference() {
     case "$2" in
         *"{env:"*|*"{file:"*)
@@ -100,10 +109,12 @@ reject_reference() {
     esac
 }
 
-# scheme://host[:port] of a URL, for deciding whether an endpoint has moved.
+# scheme://host[:port] of a URL, lower-cased, for deciding whether an endpoint
+# has moved. Anything before an @ stays in: https://good.example@evil.example
+# must not compare equal to https://good.example.
 url_origin() {
     local rest="${1#*://}"
-    printf '%s://%s' "${1%%://*}" "${rest%%/*}"
+    printf '%s://%s' "${1%%://*}" "${rest%%[/?#]*}" | tr '[:upper:]' '[:lower:]'
 }
 
 # Print the user layer, or the empty document when there is none yet.
@@ -182,7 +193,7 @@ cmd_set_provider() {
     valid_id "$id" || die "provider id must be letters, digits, '.', '_' or '-'."
     shift
 
-    local base_url="" npm="" name="" builtin="false" key_stdin="false" key_env=""
+    local base_url="" npm="" name="" builtin="false" key_stdin="false"
     local models=() headers=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -193,9 +204,14 @@ cmd_set_provider() {
             --header)        headers+=("${2:-}"); shift 2 ;;
             --builtin)       builtin="true"; shift ;;
             --api-key-stdin) key_stdin="true"; shift ;;
-            --api-key-env)   key_env="${2:-}"; shift 2 ;;
+            --api-key-env)
+                # Removed on purpose. It let the caller name ANY environment
+                # variable as "the key" and pair it with any --base-url, which
+                # is a general-purpose way to send a secret somewhere.
+                die "--api-key-env is not supported. Pipe the key in with --api-key-stdin."
+                ;;
             --api-key|--key)
-                die "API keys are not accepted as arguments. Use --api-key-stdin or --api-key-env."
+                die "API keys are not accepted as arguments. Use --api-key-stdin."
                 ;;
             *) die "unknown option '$1'." ;;
         esac
@@ -205,15 +221,15 @@ cmd_set_provider() {
         ''|http://*|https://*) ;;
         *) die "--base-url must start with http:// or https://." ;;
     esac
-    if [ "$key_stdin" = "true" ] && [ -n "$key_env" ]; then
-        die "use only one of --api-key-stdin and --api-key-env."
-    fi
-    case "$key_env" in
-        *[!A-Za-z0-9_]*) die "--api-key-env takes a variable name." ;;
+    case "$base_url" in
+        *[[:cntrl:][:space:]\"\\]*) die "--base-url may not contain quotes, backslashes, spaces or control characters." ;;
     esac
-    if reserved_env "$key_env"; then
-        die "${key_env} is this add-on's Home Assistant credential, not a provider API key."
-    fi
+    reject_reference "--base-url" "$base_url"
+    reject_reference "--name" "$name"
+    local model_arg
+    for model_arg in ${models[@]+"${models[@]}"}; do
+        reject_reference "--model" "$model_arg"
+    done
     # OpenCode installs and imports whatever package is named here the next
     # time it starts, without asking. The AI SDK's own scope covers every
     # provider protocol; anything else is a hand edit the user makes knowingly.
@@ -241,17 +257,46 @@ cmd_set_provider() {
 
     # Validate that the file can be edited BEFORE reading a key from stdin, so
     # a refused edit does not leave an orphaned secrets file behind.
-    local existing old_url drop_credentials="false"
+    local existing old_url moved="false" placeholder_key="false"
     existing=$(load_config) || return 1
 
-    # Moving a provider to a different host must not carry its credentials
-    # along. Otherwise "change the base URL" followed by `test` -- or simply
-    # by using OpenCode -- delivers the stored key and headers to the new
-    # address, which is exactly what someone steering the agent would ask for.
+    # A provider's credentials must not follow it to an address they were not
+    # given for. Three earlier versions of this guard each left a way through,
+    # because each tried to find the credentials and remove them:
+    #
+    #   - comparing against the stored baseURL missed built-in providers, which
+    #     have a key and no baseURL;
+    #   - dropping the key from opencode.json missed keys OpenCode holds
+    #     elsewhere -- its own sign-in store (auth.json) and the provider's
+    #     environment variable -- which it attaches to whatever baseURL the
+    #     config names (reproduced: a repointed provider received the
+    #     environment key);
+    #   - guessing that variable's name missed every provider that does not
+    #     follow the pattern.
+    #
+    # So this does not go looking. An explicit apiKey in the config takes
+    # precedence over both of those other sources (also reproduced), so when
+    # an address is new or has changed and the caller did not pipe in a key
+    # for it, an inert placeholder is written as the key. Whatever OpenCode
+    # holds for that provider, the new address receives the placeholder.
+    #
+    # "Changed" fails closed: no recorded baseURL counts as changed.
     old_url=$(printf '%s' "$existing" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
-    if [ -n "$base_url" ] && [ -n "$old_url" ] \
-        && [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
-        drop_credentials="true"
+    if [ -n "$base_url" ]; then
+        if [ -z "$old_url" ] || [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
+            moved="true"
+        fi
+    fi
+    if [ "$moved" = "true" ]; then
+        # An OAuth sign-in is the one case the placeholder may not cover: such
+        # providers authenticate through their own request hook rather than
+        # the apiKey option. Not verifiable here, so the move is refused.
+        if [ -s "$AUTH_FILE" ] && jq -e --arg id "$id" '
+            type == "object" and has($id) and (.[$id] | type == "object") and (.[$id].type != "api")' \
+            "$AUTH_FILE" >/dev/null 2>&1; then
+            die "provider '${id}' is signed in through OpenCode (not with a plain API key), and that sign-in could be sent to the new address. Sign it out first (opencode auth logout), or configure the endpoint under a different provider id. Nothing was changed."
+        fi
+        [ "$key_stdin" = "true" ] || placeholder_key="true"
     fi
 
     if [ "$key_stdin" = "true" ]; then
@@ -265,13 +310,15 @@ cmd_set_provider() {
         ( umask 077 && printf '%s' "$key" > "$secret_file" ) || die "could not write ${secret_file}."
         chmod 600 "$secret_file"
         api_key_ref="{file:${secret_file}}"
-    elif [ -n "$key_env" ]; then
-        api_key_ref="{env:${key_env}}"
+    elif [ "$placeholder_key" = "true" ]; then
+        api_key_ref="$PLACEHOLDER_KEY"
+        # The old key file belongs to the old address.
+        rm -f "${SECRETS_DIR:?}/${id}"
     fi
 
     update_config \
         --arg id "$id" --arg base_url "$base_url" --arg npm "$npm" --arg name "$name" \
-        --arg builtin "$builtin" --arg api_key "$api_key_ref" --arg drop "$drop_credentials" \
+        --arg builtin "$builtin" --arg api_key "$api_key_ref" --arg drop "$moved" \
         --argjson headers "$headers_json" --argjson models "$models_json" '
         (if (.provider | type) == "object" then .provider else {} end) as $providers
         | ($providers | has($id)) as $exists
@@ -304,9 +351,12 @@ cmd_set_provider() {
 
     echo "Provider '${id}' saved to ${CONFIG_FILE}"
     [ -n "$api_key_ref" ] && echo "API key reference: ${api_key_ref}"
-    if [ "$drop_credentials" = "true" ]; then
-        echo "The endpoint moved to a different host, so the previous API key and headers were"
-        echo "NOT carried over. Supply them again for the new endpoint if it needs them."
+    if [ "$placeholder_key" = "true" ]; then
+        echo "No API key was given for this address, so a placeholder (\"${PLACEHOLDER_KEY}\") was set and any"
+        echo "previous key and headers were not carried over. That is right for an endpoint"
+        echo "that needs no key. If this one does, pipe it in with --api-key-stdin."
+    elif [ "$moved" = "true" ]; then
+        echo "Any previous headers for this provider were not carried over to the new address."
     fi
     restart_note
 }
@@ -317,6 +367,7 @@ cmd_set_model() {
         ?*/?*) ;;
         *) die "expected <provider>/<model>, e.g. ollama/qwen2.5-coder:32b." ;;
     esac
+    reject_reference "the model" "$model"
     update_config --arg model "$model" '.model = $model' || return 1
     echo "Default model set to ${model}"
     restart_note
@@ -373,6 +424,15 @@ cmd_mcp_add() {
     if [ -n "$url" ] && [ "${#command[@]}" -gt 0 ]; then
         die "give either --url or a command after '--', not both."
     fi
+    case "$url" in
+        ''|http://*|https://*) ;;
+        *) die "--url must start with http:// or https://." ;;
+    esac
+    reject_reference "--url" "$url"
+    local word
+    for word in ${command[@]+"${command[@]}"}; do
+        reject_reference "the server command" "$word"
+    done
     if [ -z "$url" ] && [ "${#command[@]}" -eq 0 ]; then
         die "give --url <url> for a remote server, or a command after '--' for a local one."
     fi
@@ -525,7 +585,7 @@ cmd_test() {
     [ -n "$base_url" ] || die "provider '${id}' has no baseURL in ${CONFIG_FILE}."
     key_ref=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.apiKey // empty')
     if ! key=$(resolve_secret "$key_ref"); then
-        die "provider '${id}' takes its API key from a reference this command will not follow (only keys stored with --api-key-stdin, or a non-reserved --api-key-env). Nothing was sent."
+        die "provider '${id}' takes its API key from a reference this command will not follow (only a key stored with --api-key-stdin, or a hand-written {env:} that is not this add-on's own credential). Nothing was sent."
     fi
 
     # These values come from a file that may have been edited by hand, and
@@ -543,6 +603,9 @@ cmd_test() {
     esac
     case "$key" in
         *[[:cntrl:]]*) die "the API key for '${id}' contains control characters." ;;
+    esac
+    case "$base_url" in
+        *"{env:"*|*"{file:"*) die "provider '${id}' has a baseURL containing a {env:}/{file:} reference; this command will not expand or send it." ;;
     esac
     # A header is one line. A CR or LF inside a name or value would smuggle a
     # second header into the request.
