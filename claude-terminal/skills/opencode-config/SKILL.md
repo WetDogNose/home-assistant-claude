@@ -165,6 +165,16 @@ background jobs, `opencode_provider_models`, …). Use them when the user asks
 for a second opinion, wants a task run on a different or local model, or wants
 work done in parallel.
 
+- **Pass `agent: "review"` for anything that does not need Home Assistant** —
+  reviewing a diff, searching code, running a check. That agent carries no
+  Home Assistant tools, so each request is a fraction of the size, which
+  matters most on a local model. Leave `agent` unset when the task has to
+  read or change the house. `review` has the same permissions as the default
+  agent, never more.
+- With the add-on option `opencode_ha_tool_search` on (the default), OpenCode
+  reaches most Home Assistant tools through `ha_search_tools` and three
+  proxies. Reads run unprompted; `ha_call_write_tool` and
+  `ha_call_delete_tool` always wait for approval.
 - OpenCode must have a working provider first. If a call fails with a
   connection or auth error, run `opencode-config test <id>`.
 - A delegated run that needs to edit a file or run a command **waits for

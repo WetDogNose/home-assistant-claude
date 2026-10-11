@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.22"
+version: "2.5.1-wdn.23"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -55,6 +55,7 @@ options:
   opencode_auto_update: true
   opencode_version: ""
   opencode_lsp: true
+  opencode_ha_tool_search: true
   enable_opencode_mcp: true
   opencode_mcp_version: "3.0.0"
   ha_smart_context: true
@@ -115,6 +116,12 @@ schema:
   # OpenCode language server is disabled regardless of this option, because
   # several of them execute code found in the project directory (/config).
   opencode_lsp: bool?
+  # Run ha-mcp in tool-search mode FOR OPENCODE: a search tool and three call
+  # proxies instead of ~78 tool definitions, which were about 70,000 tokens on
+  # every request -- ruinous on a local model. Claude Code is unaffected; it
+  # defers tool definitions by itself. A switch because a small model may cope
+  # better with tools it can see than with tools it has to search for.
+  opencode_ha_tool_search: bool?
   # Register OpenCode with Claude Code as an MCP server, so Claude can hand
   # work to it. The bridge is a THIRD-PARTY package (opencode-mcp), which is
   # why it has its own switch and an exact version pin rather than tracking

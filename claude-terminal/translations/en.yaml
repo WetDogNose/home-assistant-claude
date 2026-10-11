@@ -92,6 +92,14 @@ configuration:
       such as !secret understood. Uses extra memory while OpenCode is running;
       turn it off on a small device.
 
+  opencode_ha_tool_search:
+    name: Compact Home Assistant tools in OpenCode
+    description: >-
+      Gives OpenCode a search tool for Home Assistant instead of the full list
+      of about 80 tools, which cuts what is sent to the model on every request
+      by roughly 70%. Turn it off if your model has trouble finding the tool it
+      needs. Does not affect Claude.
+
   enable_opencode_mcp:
     name: Let Claude hand work to OpenCode
     description: >-
