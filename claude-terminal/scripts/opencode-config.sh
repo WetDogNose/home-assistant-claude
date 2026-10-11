@@ -182,6 +182,22 @@ restart_note() {
     echo "Restart OpenCode for this to take effect."
 }
 
+# Stop the `opencode serve` the MCP bridge runs for Claude. It read the layers
+# once, at start, so after a resync it would carry on with the old ones -- and
+# unlike window 2 there is nothing for the user to restart. The bridge starts a
+# new one on Claude's next OpenCode call (OPENCODE_AUTO_SERVE; read in
+# opencode-mcp 3.0.0's client.js). The pattern is anchored so it cannot match
+# the TUI, or this script.
+restart_serve() {
+    local pattern='(^|/)opencode serve( |$)'
+    pgrep -f "$pattern" >/dev/null 2>&1 || return 0
+    if pkill -f "$pattern" >/dev/null 2>&1; then
+        echo "Stopped the OpenCode server behind Claude's opencode tools; it restarts with the new layers on the next call."
+    else
+        echo "Could not stop the running 'opencode serve'; it keeps the old layers until it is restarted."
+    fi
+}
+
 # Mask anything that is, or may be, a credential. A {env:..} or {file:..}
 # reference is not a secret and is the useful thing to see, so it is kept.
 REDACT_FILTER='
@@ -516,6 +532,7 @@ cmd_mcp_sync() {
                (if ((.unapproved // []) | length) > 0 then "Not shared (in /config/.mcp.json but not approved in Claude Code): \(.unapproved | join(", "))\n  Start Claude in /config and approve the server there first." else empty end)' \
             "$SHARED_REPORT"
     fi
+    restart_serve
     restart_note
 }
 

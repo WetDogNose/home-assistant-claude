@@ -1502,6 +1502,94 @@ oc_assert "resync preserves the recorded permission choice" \
 rm -f "$OPENCODE_RUN_DIR/opencode-layers.env"
 oc_refute "resync without recorded options fails rather than guessing" run_layers resync
 
+# --- opencode-layers: the mirrored allowlist ---------------------------------
+
+# A user-installed script rewrites the permission blocks of the enforced file.
+# write_layers replaces that file wholesale, so every boot and every
+# `mcp sync` used to discard its work until the next Claude session's hook.
+OC_SYNC="$OC_DIR/home/.local/bin/opencode-allowlist-sync"
+OC_SYNC_LOG="$OC_DIR/allowlist-sync.log"
+mkdir -p "$(dirname "$OC_SYNC")"
+write_sync_stub() {
+    printf '#!/bin/sh\necho "$*" >> "%s"\n%s\n' "$OC_SYNC_LOG" "$1" > "$OC_SYNC"
+    chmod +x "$OC_SYNC"
+}
+sync_runs() { [ -f "$OC_SYNC_LOG" ] && wc -l < "$OC_SYNC_LOG" | tr -d ' ' || echo 0; }
+
+write_sync_stub 'exit 0'
+rm -f "$OC_SYNC_LOG"; run_layers write
+oc_assert "write runs the allowlist sync, once, with --quiet" test "$(cat "$OC_SYNC_LOG")" = "--quiet"
+rm -f "$OC_SYNC_LOG"; run_layers resync
+oc_assert "resync runs the allowlist sync too" test "$(sync_runs)" = "1"
+# Nothing to mirror into: the enforced file has no permission block.
+rm -f "$OC_SYNC_LOG"; OC_SKIP_PERMISSIONS=true run_layers write
+oc_assert "the sync is skipped when the prompts are off" test "$(sync_runs)" = "0"
+
+# The base policy is already written. A broken sync must cost the mirrored
+# rules and nothing else -- run.sh reads this exit status as "the enforced
+# layer is missing".
+write_sync_stub 'exit 3'
+OC_SYNC_ERR=$(HOME="$OC_DIR/home" "$OC_LAYERS" write 2>&1 >/dev/null); OC_SYNC_RC=$?
+oc_assert "a failing sync does not fail the layer write" test "$OC_SYNC_RC" = "0"
+oc_assert "a failing sync is reported in exactly one line" \
+    test "$(printf '%s\n' "$OC_SYNC_ERR" | grep -c 'opencode-allowlist-sync')" = "1"
+oc_assert "the base policy is intact after a failing sync" \
+    jq -e '.permission["*"] == "ask" and (.agent.review.permission | to_entries | last) == {key: "home-assistant_*", value: "deny"}' "$OPENCODE_ENFORCED_FILE"
+# It starts OpenCode to validate what it wrote; a hang there must not hang boot.
+oc_assert "the sync is bounded by a timeout" \
+    grep -q 'timeout -k 5 "\$ALLOWLIST_SYNC_TIMEOUT"' "$OC_LAYERS"
+
+# The script calls back into opencode-layers. If that ever reached write or
+# resync, the sync would start itself.
+write_sync_stub "\"$OC_LAYERS\" write"
+rm -f "$OC_SYNC_LOG"; run_layers write
+oc_assert "a sync that re-enters write does not loop" test "$(sync_runs)" = "1"
+
+# Run as root at boot with no prompt, so the path is fixed. A copy on PATH
+# (which holds user-writable directories) or one that is not executable is not
+# an instruction to run it.
+chmod -x "$OC_SYNC"
+rm -f "$OC_SYNC_LOG"; run_layers write
+oc_assert "a sync script that is not executable is not run" test "$(sync_runs)" = "0"
+mkdir -p "$OC_DIR/pathbin"
+mv "$OC_SYNC" "$OC_DIR/pathbin/opencode-allowlist-sync"
+chmod +x "$OC_DIR/pathbin/opencode-allowlist-sync"
+rm -f "$OC_SYNC_LOG"; PATH="$OC_DIR/pathbin:$PATH" run_layers write
+oc_assert "the sync is never resolved from PATH" test "$(sync_runs)" = "0"
+oc_refute "the sync path cannot be redirected through the environment" \
+    grep -Eq 'ALLOWLIST_SYNC="?\$\{[A-Z_]+:-' "$OC_LAYERS"
+# An install without the script behaves exactly as before.
+oc_assert "without the script the layers are written and nothing is said about it" \
+    sh -c "out=\$(HOME='$OC_DIR/home' '$OC_LAYERS' write 2>&1) && ! printf '%s' \"\$out\" | grep -q allowlist"
+
+# `opencode serve` reads its config once. After a resync the one the bridge
+# runs for Claude would keep the old layers, and the user has nothing to
+# restart -- so it is stopped, and the bridge starts another on the next call.
+# pgrep and pkill are stubbed: the real ones would act on the machine running
+# the tests.
+OC_PS="$OC_DIR/psbin"
+mkdir -p "$OC_PS"
+printf '#!/bin/sh\necho "pgrep $*" >> "%s/calls"\nexit "${OC_FAKE_SERVE:-1}"\n' "$OC_PS" > "$OC_PS/pgrep"
+printf '#!/bin/sh\necho "pkill $*" >> "%s/calls"\nexit 0\n' "$OC_PS" > "$OC_PS/pkill"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$OC_LAYERS" > "$OC_PS/opencode-layers"
+chmod +x "$OC_PS/pgrep" "$OC_PS/pkill" "$OC_PS/opencode-layers"
+run_layers write
+OC_SYNC_OUT=$(OC_FAKE_SERVE=0 HOME="$OC_DIR/home" PATH="$OC_PS:$PATH" "$OC_CONFIG" mcp sync 2>/dev/null)
+oc_assert "mcp sync stops a running opencode serve" grep -q '^pkill -f .*opencode serve' "$OC_PS/calls"
+oc_assert "mcp sync says the server was stopped" \
+    sh -c "printf '%s' \"\$1\" | grep -q 'Stopped the OpenCode server'" _ "$OC_SYNC_OUT"
+rm -f "$OC_PS/calls"
+HOME="$OC_DIR/home" PATH="$OC_PS:$PATH" "$OC_CONFIG" mcp sync >/dev/null 2>&1
+oc_refute "mcp sync kills nothing when no server is running" grep -q '^pkill' "$OC_PS/calls"
+# Anchored: `opencode` alone is the TUI in window 2, and the pattern must not
+# match opencode-config's own command line.
+oc_assert "the serve pattern cannot match the TUI or opencode-config" \
+    sh -c "p=\$(sed -n \"s/^    local pattern='\\(.*\\)'\$/\\1/p\" '$OC_CONFIG'); [ -n \"\$p\" ] \
+        && echo '/data/home/.local/bin/opencode serve --hostname=127.0.0.1 --port=4096' | grep -Eq \"\$p\" \
+        && ! echo 'opencode' | grep -Eq \"\$p\" \
+        && ! echo '/bin/bash /usr/local/bin/opencode-config mcp sync' | grep -Eq \"\$p\" \
+        && ! echo 'opencode server-thing' | grep -Eq \"\$p\""
+
 # `opencode-config test` hands values from a hand-editable file to curl. It
 # used to write them into a curl CONFIG, where a newline begins a new directive
 # and `output` is a file write -- and its guard used grep, which tests each

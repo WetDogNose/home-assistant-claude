@@ -39,6 +39,9 @@
 #   opencode-layers resync    Rewrite both layers from the recorded values
 #   opencode-layers policy    Print the permission policy as JSON
 #
+# After `write` and `resync`, an executable ~/.local/bin/opencode-allowlist-sync
+# is run to re-apply the user's mirrored allowlist; see sync_allowlist.
+#
 # Environment (write):
 #   OC_SKIP_PERMISSIONS  true = omit the permission block (allow by default)
 #   OC_HA_MCP            true = register the Home Assistant MCP server
@@ -64,6 +67,15 @@ CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-${HOME}/.claude/settings.json}"
 HA_CONTEXT_FILE="${HA_CONTEXT_FILE:-${HOME}/.claude/CLAUDE.md}"
 
 DEFAULT_HA_MCP_VERSION="8.6.0"
+
+# An optional, user-installed script that mirrors Claude Code's bash allow
+# rules into the enforced file. A FIXED path under $HOME: never resolved from
+# PATH and never from /config, where a file can arrive from a git clone or a
+# restored backup -- this is run as root, at boot, with no prompt.
+ALLOWLIST_SYNC="${HOME}/.local/bin/opencode-allowlist-sync"
+# The script runs `opencode-config validate` when it changes the file, which
+# starts OpenCode once and is slow on a cold boot.
+ALLOWLIST_SYNC_TIMEOUT=150
 
 warn() { echo "opencode-layers: $*" >&2; }
 
@@ -499,11 +511,55 @@ write_layers() {
     return "$rc"
 }
 
+# Re-apply the mirrored allowlist to the enforced file that was just written.
+#
+# write_layers replaces that file wholesale, so without this every boot and
+# every `opencode-config mcp sync` discarded the mirrored rules until the next
+# Claude session's hook put them back -- and an `opencode serve` started in
+# between kept running without them, since it reads its config once.
+#
+# It runs HERE, synchronously, rather than in the background: at boot it has to
+# finish before anything can start OpenCode (window 2, or the bridge's
+# `opencode serve`), and both come after `write` returns.
+#
+# Never fatal. The base policy is already in the file and a failed sync only
+# means OpenCode asks more often, so the layers' own exit status is what the
+# caller sees.
+sync_allowlist() {
+    # No permission block to mirror into.
+    [ "$OC_SKIP_PERMISSIONS" = "true" ] && return 0
+    [ -f "$ALLOWLIST_SYNC" ] && [ -x "$ALLOWLIST_SYNC" ] || return 0
+    # The script calls `opencode-layers policy` and `opencode-config validate`,
+    # neither of which comes back here. This is for a future version that does.
+    [ -z "${OPENCODE_LAYERS_SYNCING:-}" ] || return 0
+
+    local rc=0
+    OPENCODE_LAYERS_SYNCING=1 timeout -k 5 "$ALLOWLIST_SYNC_TIMEOUT" \
+        "$ALLOWLIST_SYNC" --quiet </dev/null || rc=$?
+    case "$rc" in
+        0) ;;
+        124|137) warn "${ALLOWLIST_SYNC} timed out after ${ALLOWLIST_SYNC_TIMEOUT}s; the add-on's base policy is in place without the mirrored allowlist" ;;
+        *) warn "${ALLOWLIST_SYNC} failed (exit ${rc}); the add-on's base policy is in place without the mirrored allowlist" ;;
+    esac
+    return 0
+}
+
+# Write the layers, then mirror the allowlist if the enforced file is there to
+# mirror into (exit 2 and 3 mean it is not). Exits with write_layers' status.
+write_and_sync() {
+    local rc=0
+    write_layers || rc=$?
+    case "$rc" in
+        0|1) sync_allowlist ;;
+    esac
+    return "$rc"
+}
+
 case "${1:-}" in
     write)
         normalise_inputs
         record_inputs || warn "could not record options; 'resync' will be unavailable"
-        write_layers
+        write_and_sync
         ;;
     resync)
         if ! load_recorded; then
@@ -511,7 +567,7 @@ case "${1:-}" in
             exit 1
         fi
         normalise_inputs
-        write_layers
+        write_and_sync
         ;;
     policy)
         # From the RECORDED options, never the caller's environment, so this
