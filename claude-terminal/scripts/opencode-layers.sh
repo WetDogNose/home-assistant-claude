@@ -169,8 +169,9 @@ translate_claude_mcp() {
         # Claude Code does not expand {file:...} or {env:...}; OpenCode does. A
         # project entry carrying one literally is inert where the user approved
         # it and live here -- e.g. a URL with {file:<a secrets path>} in its
-        # query string. Refused rather than shared.
-        | def literal_ref: [.. | strings | select(test("\\{(file|env):"))] | length > 0;
+        # query string. Refused rather than shared. Keys as well as values:
+        # a header NAMED {file:...} is expanded and sent just the same.
+        | def literal_ref: [.. | (strings, (objects | keys[])) | select(test("\\{(file|env):"))] | length > 0;
         ([$project_all | to_entries[] | select(.value | literal_ref) | .key]) as $refused
         | ($project_all | with_entries(select(.value | literal_ref | not))) as $project_all
         | ($project_all | with_entries(select(

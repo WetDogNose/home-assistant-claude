@@ -1114,11 +1114,18 @@ start_automation_api() {
     esac
     custom_key=$(config_or 'automation_api_key' '')
 
+    # A key set in the options is copied into the token file. Without the
+    # marker, clearing the option later left that copy in place and the
+    # "removed" key went on working indefinitely.
+    local from_option_marker="${token_file}.from-option"
     if [ -n "$custom_key" ] && [ "$custom_key" != "null" ]; then
         echo "$custom_key" > "$token_file"
         chmod 600 "$token_file"
+        : > "$from_option_marker"
         bashio::log.info "Automation API token set from options"
-    elif [ ! -s "$token_file" ]; then
+    elif [ ! -s "$token_file" ] || [ -e "$from_option_marker" ]; then
+        [ -e "$from_option_marker" ] && bashio::log.info "automation_api_key was removed; replacing the token it had set"
+        rm -f "$from_option_marker"
         local gen_token
         gen_token=$(hexdump -vn 16 -e '4/4 "%08x"' /dev/urandom 2>/dev/null || date +%s%N | md5sum | head -c 32)
         echo "$gen_token" > "$token_file"

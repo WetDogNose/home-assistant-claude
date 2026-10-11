@@ -16,7 +16,10 @@ Examples:
   ha-snapshot camera.front_door
   ha-snapshot camera.garage /config/www/snapshots/garage.jpg
 
-Output defaults to /config/www/snapshots/<camera_entity_id>.jpg
+Output defaults to /tmp/ha-snapshots/<camera_entity_id>.jpg, which nothing
+serves and which is cleared when the add-on restarts. Anything under
+/config/www is served by Home Assistant at /local/ WITHOUT a login, so write
+there only when the image is meant for a dashboard or a notification.
 EOF
 }
 
@@ -31,7 +34,20 @@ if [[ "$ENTITY_ID" != camera.* ]]; then
     ENTITY_ID="camera.${ENTITY_ID}"
 fi
 
-DEFAULT_DIR="/config/www/snapshots"
+# An entity id is a URL path component below and a filename here.
+case "${ENTITY_ID#camera.}" in
+    ''|*[!a-z0-9_]*)
+        echo "Error: '${1}' is not a camera entity id (camera.<name>, lower-case letters, digits and _)." >&2
+        exit 1
+        ;;
+esac
+
+# NOT /config/www: Home Assistant serves that directory at /local/ with no
+# authentication, and the usual reason to take a snapshot is to look at it,
+# not to publish it. The filename is guessable (the camera's name), so the old
+# default left the last frame of every camera Claude had looked at readable by
+# anyone who could reach Home Assistant.
+DEFAULT_DIR="/tmp/ha-snapshots"
 DEFAULT_FILE="${DEFAULT_DIR}/${ENTITY_ID#camera.}.jpg"
 OUTPUT_FILE="${2:-$DEFAULT_FILE}"
 
@@ -41,6 +57,10 @@ if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
     exit 1
 fi
 
+# Private unless the caller chose somewhere that has to be readable.
+if [ "$OUTPUT_FILE" = "$DEFAULT_FILE" ]; then
+    umask 077
+fi
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 echo "Capturing snapshot from ${ENTITY_ID}..."
