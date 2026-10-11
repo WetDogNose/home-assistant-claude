@@ -137,6 +137,30 @@ class TestAPIServerUtils(unittest.TestCase):
         self.assertFalse(api_server.secrets_equal("abc", "abcdef"))
         self.assertFalse(api_server.secrets_equal("", "abc"))
 
+    def test_prompt_cannot_be_parsed_as_an_option(self):
+        # Straight after -p, a prompt beginning with "-" was an option to
+        # claude: {"prompt": "--version"} printed the version, and --settings
+        # or --mcp-config take their value in the same token.
+        from unittest import mock
+
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return mock.Mock(returncode=0, stdout="ok", stderr="")
+
+        with mock.patch.object(api_server.subprocess, "run", fake_run), \
+                mock.patch.object(api_server, "load_addon_options",
+                                  lambda: {"claude_extra_args": "--model sonnet"}):
+            result = api_server.run_claude_prompt("--settings={}", timeout=5)
+
+        self.assertTrue(result["success"])
+        cmd = seen["cmd"]
+        self.assertEqual(cmd[1], "-p")
+        self.assertEqual(cmd[-2:], ["--", "--settings={}"])
+        self.assertEqual(cmd.count("--settings={}"), 1)
+        self.assertIn("--model", cmd[:-2])
+
 
 TOKEN = "unit-test-token"
 

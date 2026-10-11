@@ -109,6 +109,25 @@ reject_reference() {
     esac
 }
 
+# The NAME half of a --header or --env pair. It becomes a JSON key, and
+# OpenCode expands a reference in a key exactly as it does in a value: a
+# header NAMED {env:SUPERVISOR_TOKEN} sends the token to that server as the
+# name of a header. Checking only the value was the same "subset of the
+# fields" mistake reject_reference exists to end, so names are held to what a
+# header or a variable name can legitimately be. `case`, not grep: grep tests
+# each line separately and would pass a name with an embedded newline.
+valid_header_name() {
+    case "$2" in
+        ''|*[!A-Za-z0-9-]*) die "$1 name '$(printf '%s' "$2" | tr -c 'A-Za-z0-9_.:{}-' '?' | cut -c1-40)' is not valid: letters, digits and '-' only." ;;
+    esac
+}
+
+valid_env_name() {
+    case "$2" in
+        ''|[0-9]*|*[!A-Za-z0-9_]*) die "$1 name '$(printf '%s' "$2" | tr -c 'A-Za-z0-9_.:{}-' '?' | cut -c1-40)' is not valid: letters, digits and '_' only, not starting with a digit." ;;
+    esac
+}
+
 # scheme://host[:port] of a URL, lower-cased, for deciding whether an endpoint
 # has moved. Anything before an @ stays in: https://good.example@evil.example
 # must not compare equal to https://good.example.
@@ -247,6 +266,7 @@ cmd_set_provider() {
             ?*=*) ;;
             *) die "--header expects NAME=value, got '${header}'." ;;
         esac
+        valid_header_name "--header" "${header%%=*}"
         reject_reference "--header" "${header#*=}"
         pair_json=$(jq -nc --arg k "${header%%=*}" --arg v "${header#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')
@@ -440,12 +460,14 @@ cmd_mcp_add() {
     local pair pair_json env_json='{}' headers_json='{}' command_json='[]'
     for pair in ${envs[@]+"${envs[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--env expects NAME=value, got '${pair}'." ;; esac
+        valid_env_name "--env" "${pair%%=*}"
         reject_reference "--env" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         env_json=$(jq -nc --argjson a "$env_json" --argjson b "$pair_json" '$a + $b')
     done
     for pair in ${headers[@]+"${headers[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--header expects NAME=value, got '${pair}'." ;; esac
+        valid_header_name "--header" "${pair%%=*}"
         reject_reference "--header" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')

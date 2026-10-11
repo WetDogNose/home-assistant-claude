@@ -135,13 +135,30 @@ require_token() {
     fi
 }
 
+# domain.object_id and nothing else. The id is a path component of the URL
+# publish_entity posts to, and curl collapses "../": `ha-entity publish
+# ../services/<domain>/<service> x` was a call to another Core API route under
+# the add-on's token.
+valid_entity_id() {
+    case "$1" in
+        *[!a-z0-9_.]*|.*|*.|*.*.*) return 1 ;;
+        *.*) return 0 ;;
+    esac
+    return 1
+}
+
 # POST one entity state. Never fails into a caller's `set -e`: this is
 # reporting, and reporting must not be able to break the thing it reports on.
 publish_entity() {
-    local entity_id="$1" state="$2" attributes="${3:-{\}}" payload
+    # Not "${3:-{\}}": inside double quotes the backslash is kept, so the
+    # default was the three characters {\} -- invalid JSON, and a publish
+    # with no attributes silently sent nothing.
+    local entity_id="$1" state="$2" attributes="${3:-}" payload
+    [ -n "$attributes" ] || attributes='{}'
 
     [ -n "$entity_id" ] || return 0
     [ -n "${SUPERVISOR_TOKEN:-}" ] || return 0
+    valid_entity_id "$entity_id" || return 0
 
     payload=$(jq -nc --arg s "$state" --argjson a "$attributes" \
         '{state: $s, attributes: $a}' 2>/dev/null) || return 0
@@ -365,7 +382,11 @@ case "${1:-}" in
             echo "Usage: ha-entity publish <entity_id> <state> [attributes-json]" >&2
             exit 1
         fi
-        publish_entity "$2" "$3" "${4:-{\}}"
+        if ! valid_entity_id "$2"; then
+            echo "ha-entity: not an entity id (expected domain.object_id): $(printf '%s' "$2" | tr -c 'A-Za-z0-9_.' '?' | cut -c1-80)" >&2
+            exit 1
+        fi
+        publish_entity "$2" "$3" "${4:-}"
         ;;
     heartbeat)
         require_token || exit 1

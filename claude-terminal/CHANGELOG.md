@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.5.1-wdn.24
+
+Security fixes from a review of the whole add-on. Update if you use OpenCode,
+camera snapshots or the Automation API.
+
+- **`opencode-config` could be talked into sending a secret to another
+  server.** It refused `{env:...}` and `{file:...}` in the value of a
+  `--header` or `--env`, but not in the name, and OpenCode fills them in there
+  too. A header named `{env:SUPERVISOR_TOKEN}` would have sent the Home
+  Assistant token to whatever server it was added for. Names are now limited
+  to what a header or variable name can be. The same gap is closed for
+  servers shared from `/config/.mcp.json`.
+- **Camera snapshots no longer land in a public folder.** `ha-snapshot` saved
+  to `/config/www/snapshots/` by default, which Home Assistant serves without
+  a login under a guessable name. It now saves to `/tmp/ha-snapshots/`, which
+  nothing serves and which is emptied when the add-on restarts. Pass a path
+  under `/config/www/` yourself when you want the image in a dashboard.
+  **Snapshots already in `/config/www/snapshots/` are not removed; delete any
+  you do not want public.**
+- **A prompt beginning with `-` was read as an option to Claude** by the
+  Automation API and scheduled jobs. Prompts are now always treated as
+  prompts.
+- **Images in notifications are turned into plain links.** A notification
+  made from Claude's reply could contain an image that your browser would
+  fetch as soon as the notification drawer opened. The bundled job-result
+  blueprint does the same; if you edited your copy, it is left as it is.
+- **`ha-entity publish` only accepts an entity id**, such as
+  `sensor.my_value`. It also now works when no attributes are given, which
+  previously sent nothing.
+- **Removing `automation_api_key` retires that key.** Before, clearing the
+  option left the old key working. A new token is generated on the next
+  start; read it from `/data/automation_api_token`.
+- Names taken from Home Assistant for Claude's memory file are kept to one
+  line each.
+
 ## 2.5.1-wdn.23
 
 OpenCode was sending about 82,000 tokens with every request before your prompt

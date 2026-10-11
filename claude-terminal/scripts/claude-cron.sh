@@ -540,7 +540,8 @@ execute_job() {
 
     # CLAUDE_TERMINAL_NO_HOOK_NOTIFY: Claude Code's Stop hook fires for `-p`
     # runs too, so without this every scheduled job would notify twice.
-    output=$(CLAUDE_TERMINAL_NO_HOOK_NOTIFY=1 claude -p "$prompt" ${flags[@]+"${flags[@]}"} 2>&1) || rc=$?
+    # The prompt follows "--": one beginning with "-" is otherwise an option.
+    output=$(CLAUDE_TERMINAL_NO_HOOK_NOTIFY=1 claude -p ${flags[@]+"${flags[@]}"} -- "$prompt" 2>&1) || rc=$?
 
     ended=$(date +%s)
     duration=$((ended - started))

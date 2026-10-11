@@ -191,7 +191,9 @@ actions:
   - action: persistent_notification.create
     data:
       title: "{{ job_title }}"
-      message: "{{ job_message }}"
+      # The reply is model output and a notification renders markdown: an
+      # image in it would be fetched as soon as the drawer opens.
+      message: "{{ job_message | replace('![', '[') | replace('<img', '&lt;img') }}"
       notification_id: "claude_terminal_job_{{ job_id }}"
 
   - choose:

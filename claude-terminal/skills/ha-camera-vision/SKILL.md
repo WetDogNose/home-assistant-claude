@@ -16,9 +16,9 @@ ha-snapshot <camera_entity_id> [output_file]
 ```
 
 ```bash
-ha-snapshot camera.front_door                      # -> /config/www/snapshots/front_door.jpg
+ha-snapshot camera.front_door                      # -> /tmp/ha-snapshots/front_door.jpg
 ha-snapshot front_door                             # `camera.` prefix added for you
-ha-snapshot camera.garage /config/snapshots/garage.jpg
+ha-snapshot camera.garage /config/claude-snapshots/garage.jpg
 ```
 
 It creates the output directory, reports the saved path and size, and on a
@@ -36,7 +36,7 @@ curl -s -H "Authorization: Bearer $SUPERVISOR_TOKEN" http://supervisor/core/api/
 
 The capture is only half the job — **read the saved file** so you can actually
 describe what is in the frame. A message saying "snapshot saved to
-/config/www/snapshots/front_door.jpg" answers nothing the user asked.
+/tmp/ha-snapshots/front_door.jpg" answers nothing the user asked.
 
 Describe what is visibly there and be honest about what the image cannot
 settle: night frames are noisy and IR-lit, wide-angle lenses distort distance,
@@ -46,21 +46,20 @@ than guessing.
 
 ## Where to write the file
 
-The default `/config/www/snapshots/` is convenient but public-ish: everything
-under `/config/www` is served by Home Assistant at `/local/`, with no
-authentication. On an instance exposed to the internet, anyone with the URL can
-fetch the file, and it stays there until deleted.
+The default is `/tmp/ha-snapshots/`: private, served by nothing, and cleared
+when the add-on restarts. That is right for looking at a frame.
 
-So choose deliberately:
+Everything under `/config/www` is served by Home Assistant at `/local/` **with
+no login**. Anyone who can reach Home Assistant can fetch a file there if they
+can guess its name, and it stays until deleted.
 
-- **Just looking at it now** → write to `/tmp/` or `/config/claude-snapshots/`.
-  Nothing is served, and `/tmp` is cleared when the container restarts.
-- **The user wants it in a dashboard card or a notification** → `/config/www/`
-  is the right place, because that is what makes the URL work. Mention that it
-  is reachable at `/local/snapshots/<file>.jpg`.
-
-Interior cameras and anything showing people deserve the first option by
-default. Clean up snapshots you created for your own inspection.
+- **Just looking at it now** → the default. To keep a frame across restarts,
+  pass a path under `/config/claude-snapshots/`.
+- **The user wants it in a dashboard card or a notification** → pass a path
+  under `/config/www/` explicitly, because that is what makes the URL work.
+  Tell them it is reachable without signing in, at `/local/<path>`, and do
+  not do this for interior cameras or frames showing people unless they asked
+  for exactly that.
 
 ## Repeat captures
 

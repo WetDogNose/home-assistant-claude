@@ -663,7 +663,12 @@ def run_claude_prompt(prompt: str, timeout: int = DEFAULT_TIMEOUT_SECONDS,
         _deadline = time.time() + timeout
     timeout = max(5, int(min(timeout, _deadline - time.time())))
 
-    cmd = [claude_bin, "-p", prompt]
+    # The prompt goes LAST, after "--" (appended below). As the argument
+    # straight after -p, a prompt beginning with "-" was parsed by claude as an
+    # option: {"prompt": "--version"} printed the version, and --settings or
+    # --mcp-config take a value in the same token. The Assist blueprint passes
+    # whatever was typed.
+    cmd = [claude_bin, "-p"]
 
     session_uuid = ""
     session_is_new = False
@@ -687,6 +692,8 @@ def run_claude_prompt(prompt: str, timeout: int = DEFAULT_TIMEOUT_SECONDS,
             cmd.extend(shlex.split(extra_args))
         except Exception as e:
             logger.warning(f"Could not parse claude_extra_args '{extra_args}': {e}")
+
+    cmd += ["--", prompt]
 
     # Setup environment
     data_home = "/data/home"
