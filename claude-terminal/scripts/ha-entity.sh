@@ -19,6 +19,11 @@
 #   ha-entity publish <id> <state> [attributes-json]
 #   ha-entity heartbeat [seconds]      Re-publish on a loop (daemon)
 #
+# A leading `--agent opencode` switches every command to OpenCode's state file
+# and its own entities (binary_sensor.opencode_busy, sensor.opencode_*). With
+# no flag the behaviour is exactly what it was before OpenCode existed, so
+# every existing caller is unaffected.
+#
 # States created through the REST API are RUNTIME state: Home Assistant does not
 # persist them, so every one of these entities disappears when Core restarts and
 # stays gone until something publishes it again. That is what `heartbeat` is
@@ -31,6 +36,30 @@ set -o pipefail
 STATE_FILE="${CLAUDE_STATE_FILE:-/data/claude-state.json}"
 HEARTBEAT_SECONDS="${CLAUDE_ENTITY_HEARTBEAT_SECONDS:-300}"
 DEFAULT_STATE='{"status":"idle","busy":false,"login_required":false,"last_run":"","last_result":"","last_error":"","last_source":"","version":""}'
+
+# OpenCode keeps its own state file rather than extra keys in Claude's: the two
+# are written by unrelated processes, and a shared document would have each
+# one's writes contending for the other's lock.
+OPENCODE_STATE_FILE="${OPENCODE_STATE_FILE:-/data/opencode-state.json}"
+
+AGENT="claude"
+if [ "${1:-}" = "--agent" ]; then
+    AGENT="${2:-}"
+    shift 2 2>/dev/null || shift $#
+fi
+case "$AGENT" in
+    claude) ;;
+    opencode)
+        STATE_FILE="$OPENCODE_STATE_FILE"
+        # No login_required and no last_source: OpenCode has no single sign-in
+        # to wait on, and only one way of being started.
+        DEFAULT_STATE='{"status":"idle","busy":false,"last_run":"","last_result":"","last_error":"","model":"","version":""}'
+        ;;
+    *)
+        echo "ha-entity: unknown agent '${AGENT}' (expected: opencode)." >&2
+        exit 1
+        ;;
+esac
 
 # setup_commands COPIES this script to /usr/local/bin/ha-entity, so the library
 # is not beside the running copy -- $(dirname "$0") finds it only when running
@@ -61,6 +90,8 @@ Usage:
   ha-entity publish <entity_id> <state> [attributes-json]
   ha-entity heartbeat [seconds]         Re-publish on a loop
 
+  ha-entity --agent opencode <command>  The same, for OpenCode's entities
+
 Known keys:
   status          idle | running | error | login_required
   busy            true | false
@@ -78,6 +109,14 @@ Entities published:
   sensor.claude_terminal_last_run
   sensor.claude_terminal_last_result
   sensor.claude_terminal_version
+
+With --agent opencode (keys: status, busy, last_run, last_result, last_error,
+model, version; status is idle | running | retrying | waiting | error):
+  binary_sensor.opencode_busy
+  sensor.opencode_status
+  sensor.opencode_last_run
+  sensor.opencode_last_result
+  sensor.opencode_version
 
 Home Assistant does not persist API-created states, so they vanish on a Core
 restart until something republishes them. `ha-entity heartbeat` (started by the
@@ -150,8 +189,52 @@ publish_all() {
     done
 }
 
+cmd_sync_opencode() {
+    local status busy last_run last_result last_error model version
+    status=$(state_get '.status // "idle"')
+    busy=$(state_get '.busy // false')
+    last_run=$(state_get '.last_run // ""')
+    last_result=$(state_get '.last_result // ""')
+    last_error=$(state_get '.last_error // ""')
+    model=$(state_get '.model // ""')
+    version=$(state_get '.version // ""')
+    [ -n "$version" ] || version="unknown"
+
+    # Same rule as Claude's last_run: never publish "" under a timestamp
+    # device_class.
+    local last_run_state="unknown" last_run_attrs
+    if [ -n "$last_run" ]; then
+        last_run_state="$last_run"
+        last_run_attrs=$(jq -nc --arg n "OpenCode Last Run" \
+            '{friendly_name: $n, icon: "mdi:clock-outline", device_class: "timestamp"}')
+    else
+        last_run_attrs=$(jq -nc --arg n "OpenCode Last Run" \
+            '{friendly_name: $n, icon: "mdi:clock-outline"}')
+    fi
+
+    publish_all \
+        "binary_sensor.opencode_busy" "$(on_off "$busy")" \
+        "$(jq -nc --arg n "OpenCode Busy" \
+            '{friendly_name: $n, icon: "mdi:robot-outline", device_class: "running"}')" \
+        "sensor.opencode_status" "$status" \
+        "$(jq -nc --arg n "OpenCode Status" --arg m "$model" \
+            --arg v "$(cat /opt/scripts/addon-version 2>/dev/null || echo unknown)" \
+            '{friendly_name: $n, icon: "mdi:console-line", model: $m, addon_version: $v}')" \
+        "sensor.opencode_last_run" "$last_run_state" "$last_run_attrs" \
+        "sensor.opencode_last_result" "${last_result:-unknown}" \
+        "$(jq -nc --arg n "OpenCode Last Result" --arg e "$last_error" \
+            '{friendly_name: $n, icon: "mdi:check-circle-outline", error: $e}')" \
+        "sensor.opencode_version" "$version" \
+        "$(jq -nc --arg n "OpenCode Version" \
+            '{friendly_name: $n, icon: "mdi:tag-outline"}')"
+}
+
 cmd_sync() {
     require_token || return 1
+    if [ "$AGENT" = "opencode" ]; then
+        cmd_sync_opencode
+        return
+    fi
 
     local status busy login_required last_run last_result last_error last_source version
     status=$(state_get '.status // "idle"')
@@ -256,6 +339,11 @@ cmd_heartbeat() {
 
     while true; do
         cmd_sync || true
+        # OpenCode's entities ride the same heartbeat. The state file is the
+        # switch: run.sh seeds it only when OpenCode and entities are both on.
+        if [ "$AGENT" = "claude" ] && [ -f "$OPENCODE_STATE_FILE" ]; then
+            "$0" --agent opencode sync >/dev/null 2>&1 || true
+        fi
         sleep "$interval"
     done
 }

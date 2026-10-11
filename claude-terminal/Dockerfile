@@ -37,6 +37,8 @@ RUN apk upgrade --no-cache \
     git \
     github-cli \
     jq \
+    libgcc \
+    libstdc++ \
     nano \
     nodejs \
     npm \
@@ -129,6 +131,45 @@ RUN case "$(apk --print-arch)" in \
         > /usr/local/share/claude-terminal/build-versions.json \
     && rm -f /tmp/claude-ldd.txt
 
+# Bundled OpenCode (https://opencode.ai), the second agent in the terminal.
+# Treated exactly like the bundled Claude above, for the same reasons: fetched
+# as the native musl binary from the npm registry (no npm/Node, which crash
+# under QEMU in the aarch64 build), frozen at build time as the fallback copy,
+# and checked with ldd so a binary that is present and +x but cannot relocate
+# fails the BUILD rather than a user's terminal. It links libstdc++ and libgcc,
+# which is why those are named in the apk list above instead of being left to
+# arrive as a dependency of nodejs.
+#
+# amd64 takes the `baseline` build. The default x64 build requires AVX2, which
+# the older Celeron and Atom machines Home Assistant commonly runs on lack, and
+# an illegal-instruction crash on launch is the same blank window by another
+# route.
+#
+# Empty resolves "latest" at build time; an exact X.Y.Z pins it.
+ARG OPENCODE_VERSION=""
+
+RUN case "$(apk --print-arch)" in \
+        x86_64)  opencode_pkg="linux-x64-baseline-musl" ;; \
+        aarch64) opencode_pkg="linux-arm64-musl" ;; \
+        *) echo "Unsupported architecture: $(apk --print-arch)" >&2; exit 1 ;; \
+    esac \
+    && opencode_version="${OPENCODE_VERSION:-$(curl -fsSL https://registry.npmjs.org/opencode-ai/latest | jq -r .version)}" \
+    && echo "Bundling OpenCode ${opencode_version}" \
+    && curl -fsSL "https://registry.npmjs.org/opencode-${opencode_pkg}/-/opencode-${opencode_pkg}-${opencode_version}.tgz" \
+        | tar -xz -C /tmp package/bin/opencode \
+    && install -m 0755 /tmp/package/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /tmp/package \
+    && { ldd /usr/local/bin/opencode || true; } > /tmp/opencode-ldd.txt 2>&1 \
+    && if grep -qE 'symbol not found|Error loading shared library' /tmp/opencode-ldd.txt; then \
+           echo "FATAL: bundled opencode cannot resolve against this base image:" >&2; \
+           grep -E 'symbol not found|Error loading shared library' /tmp/opencode-ldd.txt >&2; \
+           exit 1; \
+       fi \
+    && jq -c --arg v "${opencode_version}" '. + {opencode: $v}' \
+        /usr/local/share/claude-terminal/build-versions.json > /tmp/build-versions.json \
+    && mv /tmp/build-versions.json /usr/local/share/claude-terminal/build-versions.json \
+    && rm -f /tmp/opencode-ldd.txt
+
 WORKDIR /config
 
 COPY run.sh /run.sh
@@ -141,6 +182,9 @@ COPY skills/ /opt/skills/
 # ttyd's web client, plus the touch key bar appended to it. Kept out of
 # /opt/scripts because nothing here is a command: it is served to the browser.
 COPY web/ /opt/web/
+# OpenCode's add-on-owned config directory: the plugin that reports its state
+# to Home Assistant. Found through OPENCODE_CONFIG_DIR; loaded, never executed.
+COPY opencode/ /opt/opencode/
 RUN chmod +x /run.sh /opt/scripts/*
 
 # Bake the mobile key bar into ttyd's own index.html.

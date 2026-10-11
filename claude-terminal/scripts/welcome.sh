@@ -30,6 +30,7 @@ echo -e "  ${WHITE}claude-session${NC}    run several Claude sessions at once ($
 echo -e "  ${WHITE}claude-usage${NC}      token usage from your own session transcripts"
 echo -e "  ${WHITE}claude-hooks${NC}      notify Home Assistant when Claude finishes (${DIM}status|test${NC})"
 echo -e "  ${WHITE}ha-entity${NC}         publish add-on state as HA entities (${DIM}set|sync|show${NC})"
+echo -e "  ${WHITE}opencode-config${NC}   point OpenCode at any API endpoint (${DIM}set-provider|test|mcp${NC})"
 echo -e "  ${WHITE}esphome-setup${NC}     install & persist ESPHome CLI"
 echo -e "  ${WHITE}ha-tts${NC}            send TTS voice announcement to speaker"
 echo -e "  ${WHITE}claude-doctor${NC}     diagnose network, auth, and environment issues"
@@ -38,6 +39,7 @@ echo -e "  ${WHITE}persist-install${NC}   install apk/pip packages that survive 
 echo -e "  ${WHITE}ha-context${NC}        refresh the Home Assistant context file for Claude"
 echo -e "  ${DIM}Claude knows these tools — just ask for the outcome (skills in ~/.claude/skills)${NC}"
 echo -e "  ${DIM}Tip: Press Ctrl+B then 'h' inside tmux for the HA Helper Menu${NC}"
+echo -e "  ${DIM}Tip: Ctrl+B then 2 switches to OpenCode, Ctrl+B then 1 back to Claude${NC}"
 echo ""
 
 if [ "$1" = "--shell" ]; then

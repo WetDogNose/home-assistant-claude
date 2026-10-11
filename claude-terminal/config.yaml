@@ -5,7 +5,7 @@ description: "Web terminal with Anthropic's Claude Code CLI and persistent auth"
 # based on stays visible and tags never collide with upstream's. Bump on every
 # deployable change -- the Supervisor compares version strings, so pushing new
 # code under an unchanged version means HA never offers the update.
-version: "2.5.1-wdn.19"
+version: "2.5.1-wdn.20"
 # Distinct from upstream's "claude_terminal" so both can be installed side by
 # side. Changing this again creates a NEW add-on with an empty /data.
 slug: "claude_terminal_wdn"
@@ -51,6 +51,12 @@ options:
   claude_version: ""
   dangerously_skip_permissions: false
   claude_extra_args: ""
+  enable_opencode: true
+  opencode_auto_update: true
+  opencode_version: ""
+  opencode_lsp: true
+  enable_opencode_mcp: true
+  opencode_mcp_version: "3.0.0"
   ha_smart_context: true
   ha_context_refresh_hours: 24
   notify_on_completion: true
@@ -92,6 +98,27 @@ schema:
   claude_version: str?
   dangerously_skip_permissions: bool?
   claude_extra_args: str?
+  # OpenCode (https://opencode.ai) as a second agent, in tmux window 2 of the
+  # same terminal. It can be pointed at any API endpoint; that configuration
+  # is a JSON file in /data managed with `opencode-config`, deliberately NOT a
+  # set of options here, because an options form can only express the fields
+  # it anticipated and /data/options.json is plaintext that rides along in
+  # backups -- the wrong place for an API key.
+  enable_opencode: bool?
+  opencode_auto_update: bool?
+  # Empty tracks the newest release; an exact X.Y.Z pins it. Same escape hatch
+  # as claude_version, for the same reason: the update happens at runtime.
+  opencode_version: str?
+  # Language servers inside OpenCode (YAML with Home Assistant's tags, shell,
+  # Python). Each one is another long-lived process, which is the reason this
+  # is a switch: on a small Raspberry Pi that memory may be better spent.
+  opencode_lsp: bool?
+  # Register OpenCode with Claude Code as an MCP server, so Claude can hand
+  # work to it. The bridge is a THIRD-PARTY package (opencode-mcp), which is
+  # why it has its own switch and an exact version pin rather than tracking
+  # latest: it runs as root beside the Supervisor token.
+  enable_opencode_mcp: bool?
+  opencode_mcp_version: str?
   ha_smart_context: bool?
   # How often to regenerate that context. 0 disables the refresh and keeps the
   # boot-time generation only. The default matters more than it looks: a Home
@@ -158,6 +185,13 @@ backup_exclude:
   - "home/.local/bin/claude"      # symlink into the version store above
   - "home/.claude/downloads"      # installer scratch ($HOME/.claude/downloads)
   - "home/.npm"                   # legacy npm cache (#103)
+  - "home/.local/bin/opencode"    # persistent OpenCode binary (~190MB)
+  - ".cache/opencode"             # OpenCode's downloaded language servers
+  - ".local/share/opencode/log"   # OpenCode logs
+  - ".local/share/opencode-mcp"   # the MCP bridge's node_modules
+                                  # NOT excluded: .config/opencode (provider
+                                  # config and API keys) and the rest of
+                                  # .local/share/opencode (sessions, auth.json)
 
 # Volume mappings for file access.
 #

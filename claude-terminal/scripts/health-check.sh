@@ -107,6 +107,98 @@ check_claude_cli() {
     fi
 }
 
+# OpenCode, the second agent. Same question as for Claude -- does a copy
+# actually RUN, not merely exist -- plus the pieces that are specific to it:
+# the config layers the add-on writes and the bridge that lets Claude drive it.
+check_opencode() {
+    bashio::log.info "=== OpenCode Check ==="
+
+    local enabled
+    enabled=$(bashio::config 'enable_opencode' 'true' 2>/dev/null) || enabled=""
+    if [ "$enabled" = "false" ]; then
+        bashio::log.info "OpenCode is disabled in options (enable_opencode)"
+        return 0
+    fi
+
+    # Fixed /data paths rather than $HOME: this script runs under with-contenv,
+    # which can hand it the container's HOME instead of the terminal's.
+    local persistent="/data/home/.local/bin/opencode" bundled="/usr/local/bin/opencode"
+    local working=0 candidate label version
+    for candidate in "$persistent" "$bundled"; do
+        [ "$candidate" = "$persistent" ] && label="Persistent" || label="Bundled"
+        if [ ! -x "$candidate" ]; then
+            bashio::log.info "$label OpenCode: not installed ($candidate)"
+            continue
+        fi
+        if version=$(timeout 10 "$candidate" --version 2>&1 | head -1) && [ -n "$version" ]; then
+            bashio::log.info "$label OpenCode: $version ✓"
+            working=1
+        else
+            bashio::log.error "$label OpenCode is present but fails to run ✗ ($candidate)"
+        fi
+    done
+    if [ "$working" -eq 0 ]; then
+        bashio::log.error "No working OpenCode found ✗"
+        return 1
+    fi
+
+    local rc=0
+    local user_config="/data/.config/opencode/opencode.json"
+    if [ ! -e "$user_config" ]; then
+        bashio::log.info "No provider configured yet ($user_config does not exist) - run: opencode-config --help"
+    elif jq -e 'type == "object"' "$user_config" >/dev/null 2>&1; then
+        bashio::log.info "User config parses ✓ ($(jq -r 'if (.provider | type) == "object" then (.provider | length) else 0 end' "$user_config") provider(s), model: $(jq -r '.model // "not set"' "$user_config"))"
+    else
+        bashio::log.error "User config is not valid JSON ✗ ($user_config)"
+        rc=1
+    fi
+
+    if [ -s /etc/opencode/opencode.json ]; then
+        if jq -e 'has("permission")' /etc/opencode/opencode.json >/dev/null 2>&1; then
+            bashio::log.info "Enforced layer present ✓ (OpenCode asks before edits and commands)"
+        else
+            bashio::log.warning "Enforced layer present; confirmation prompts are OFF (dangerously_skip_permissions)"
+        fi
+    else
+        bashio::log.error "Enforced layer missing ✗ - OpenCode runs without confirmation prompts; restart the add-on"
+        rc=1
+    fi
+
+    if [ -s /run/claude-terminal/opencode-defaults.json ]; then
+        bashio::log.info "Defaults layer present ✓"
+    else
+        bashio::log.warning "Defaults layer missing - no Home Assistant tools, shared MCP servers or language servers in OpenCode"
+    fi
+
+    local report="/run/claude-terminal/opencode-mcp-shared.json"
+    if [ -s "$report" ]; then
+        bashio::log.info "MCP servers shared from Claude Code: $(jq -r '.shared | length' "$report" 2>/dev/null || echo "?")"
+        local skipped
+        skipped=$(jq -r '.skipped | join(", ")' "$report" 2>/dev/null || true)
+        [ -n "$skipped" ] && bashio::log.warning "Not shared (no OpenCode equivalent): $skipped"
+    fi
+
+    local bridge_enabled
+    bridge_enabled=$(bashio::config 'enable_opencode_mcp' 'true' 2>/dev/null) || bridge_enabled=""
+    if [ "$bridge_enabled" = "false" ]; then
+        bashio::log.info "OpenCode MCP bridge is disabled in options (enable_opencode_mcp)"
+    else
+        local package_json="/data/.local/share/opencode-mcp/node_modules/opencode-mcp/package.json"
+        if [ -f "$package_json" ]; then
+            bashio::log.info "OpenCode MCP bridge installed: opencode-mcp $(jq -r '.version' "$package_json" 2>/dev/null) ✓"
+        else
+            bashio::log.warning "OpenCode MCP bridge is not installed - Claude has no OpenCode tools (check the add-on log)"
+        fi
+        if jq -e '.projects["/config"].mcpServers.opencode // .mcpServers.opencode' /data/home/.claude.json >/dev/null 2>&1; then
+            bashio::log.info "Bridge registered with Claude Code ✓"
+        else
+            bashio::log.warning "Bridge is not registered with Claude Code"
+        fi
+    fi
+
+    return "$rc"
+}
+
 check_github_cli() {
     bashio::log.info "=== GitHub CLI Check ==="
 
@@ -212,6 +304,7 @@ run_diagnostics() {
     check_directory_permissions || ((errors++))
     check_node_installation || ((errors++))
     check_claude_cli || ((errors++))
+    check_opencode || ((errors++))
     check_github_cli || ((errors++))
     check_network_connectivity || ((errors++))
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Home Assistant add-on repository containing one add-on: **Claude Terminal** — Claude Code CLI in a browser terminal (ttyd + tmux). The design goal is to stay thin: the add-on's job is running Claude Code reliably, not wrapping it in extra UI.
+A Home Assistant add-on repository containing one add-on: **Claude Terminal** — Claude Code CLI in a browser terminal (ttyd + tmux), with [OpenCode](https://opencode.ai/) as a second agent in tmux window 2. The design goal is to stay thin: the add-on's job is running Claude Code reliably, not wrapping it in extra UI.
 
 Everything shippable lives in `claude-terminal/`. The repo root holds the HA add-on repository metadata (`repository.yaml`), the Nix dev shell, and docs.
 
@@ -51,11 +51,13 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
 - **run.sh** — the boot path: environment/persistence setup, background Claude update, ttyd launch
 - **scripts/** — copied to `/opt/scripts/`; `run.sh` installs most of them into `/usr/local/bin` under friendlier names
 - **skills/** — Claude Code skills documenting the add-on's own tooling; copied to `/opt/skills/`, synced into `$HOME/.claude/skills` at boot. Read, never executed, so they need no `+x`
+- **opencode/** — OpenCode's add-on-owned config directory (`plugins/ha-entities.js`). Copied to `/opt/opencode/` and found through `OPENCODE_CONFIG_DIR`; loaded, never executed
 - **web/** — the browser side: `mobile-keys.js` (touch key bar) and `build-index.py`, which bakes it into ttyd's client at image build time. Copied to `/opt/web/`; served, never executed
 
 ### Container execution flow (`run.sh` `main()`)
 1. `init_environment` — point HOME/XDG at `/data` (persistent), prepend `/data/home/.local/bin` to PATH, clean legacy npm cache, migrate legacy credentials, install `.tmux.conf`
 2. `setup_commands` — install `welcome`, `persist-install`, `ha-context`, `claude-doctor` (health-check.sh), `claude-login-url`, `github-setup`, `claude-api-server` into `/usr/local/bin`; write the add-on version to `/opt/scripts/addon-version`
+   `setup_opencode` (right after `setup_commands`, which installs `opencode-layers`) — write OpenCode's two config layers, export the `OPENCODE_*` environment ttyd will inherit, background `update_opencode`
 3. `install_skills` — resync `/opt/skills/` into `$HOME/.claude/skills/`; `install_hooks` — rewrite the managed hook block in `$HOME/.claude/settings.json`
 4. `update_claude` — validate/repair the persistent native install, then background install/update into `/data`
 5. `install_persistent_packages` — apk/pip packages from add-on options **and** `/data/persistent-packages.json` (written by `persist-install`)
@@ -63,8 +65,8 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
 7. `start_automation_api` — auto-generates `/data/automation_api_token` if empty and launches background HTTP daemon (`claude-api-server.py`) on port 8128
 8. `generate_ha_context` — background CLAUDE.md generation via the Supervisor API
 9. `start_entity_heartbeat` — publishes the add-on's own entities and re-publishes every 5 min; `start_context_refresh` — periodic `ha-context`; `notify_ingress_advisory` — one-time security notice
-10. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`
-11. `start_web_terminal` — `exec ttyd ... tmux new-session -A -s claude 'claude [flags]'` (or `welcome --shell` when `auto_launch_claude: false`)
+10. `setup_ha_mcp` — sourced, then `configure_ha_mcp_server` registers ha-mcp with `claude mcp add`; `setup_opencode_mcp` — installs and registers the `opencode-mcp` bridge the same way (both inside `provision_async`)
+11. `start_web_terminal` — `exec ttyd ... terminal-session 'claude-launch [flags]'` (or `'welcome --shell'` when `auto_launch_claude: false`). `terminal-session` creates the tmux session — window 1 Claude, window 2 `opencode-launch --wait` when OpenCode is enabled — on the first connection and attaches on every later one
 
 ### Key design rules
 - **Nothing on the boot path may hit the network or block on input.** Network work (updates, context generation, MCP pre-warm) is backgrounded; packages ship in the image.
@@ -87,6 +89,15 @@ Automated testing is available via `./ci/local-validate.sh` and runs automatical
 - **`jq`'s `//` is not a null-coalesce.** It returns its right-hand side for `false` as well as `null`, so `.enabled // true` reads a disabled record back as enabled. This shipped as "a paused cron job still runs". Every boolean default in this repo is written as an explicit comparison (`if .enabled == false then …`), and `tests/test_scripts.sh` pins it.
 - **Word-splitting a cron schedule also globs it.** Every field can be a literal `*`, so an unquoted split expands against the working directory — `/config` for a scheduled job — and the schedule silently matches nothing. `claude-cron`'s `safe_split` disables globbing around every split for exactly this; a test asserts it from a non-empty directory.
 - **`state-lib.sh` is sourced, never executed.** Like `login-url-lib.sh`, it is absent from `setup_commands` and checked separately in `ci/smoke.sh`. Consumers are *copied* to `/usr/local/bin`, so they look for it beside `$0` **and** in `/opt/scripts` — a `dirname "$0"` lookup alone breaks the installed copy.
+- **OpenCode is a second native musl binary, with the same three guards as Claude.** Build-time `ldd` check in the Dockerfile, a boot-time probe that deletes a persistent copy that cannot run, and `opencode-launch` re-probing at launch. Its own updater is off (`OPENCODE_DISABLE_AUTOUPDATE`, `autoupdate: false`): `install_opencode_native` verifies a download in `/tmp` *before* moving it onto PATH, and that must stay the only way the binary changes. amd64 uses the `baseline` build because the default one needs AVX2.
+- **OpenCode's config is three layers, and the add-on never edits the user's.** OpenCode merges, lowest first: the user file (`/data/.config/opencode/opencode.json`, edited by Claude through `opencode-config`), `$OPENCODE_CONFIG` (the add-on's *defaults*: ha-mcp, HA context, LSP, MCP servers shared from Claude), a project `opencode.json`, then `/etc/opencode/opencode.json` (the add-on's *enforced* layer: permissions). Both add-on layers are written by `opencode-layers` on every boot and live outside `/data`, so they are shipped state. **Permissions must stay in the enforced layer**: the terminal's working directory is `/config`, a project config there outranks `OPENCODE_CONFIG`, and an agent could otherwise turn off its own prompts by writing one file. `dangerously_skip_permissions` is read fail-safe here — only an explicit `true` removes the prompts — the opposite direction from `build_claude_flags`, deliberately.
+- **`opencode-layers` is run by two callers that cannot share an options reader.** `run.sh` has bashio; `opencode-config mcp sync` runs in the user's terminal and does not. So `write` records the option values it was given and `resync` replays them. The record is parsed, never sourced, and values are confined to `[A-Za-z0-9._-]`.
+- **Two MCP names are never shared from Claude into OpenCode**: `opencode` (the bridge — OpenCode would be calling itself) and `home-assistant` (the add-on writes its own entry referencing `{env:SUPERVISOR_TOKEN}`, where `claude mcp add` stored the literal token).
+- **OpenCode's `debug config` output contains resolved secrets.** It expands every `{env:}` and `{file:}` reference. `opencode-config validate` discards stdout for exactly that reason; don't print it to "help debugging".
+- **An API key never appears in an argument or in `opencode.json`.** `opencode-config` takes it on stdin only, stores it in `secrets/<id>` (600) and writes a `{file:}` reference. It validates that the config is editable *before* reading the key, so a refused edit cannot orphan a secrets file.
+- **`opencode-yaml-ls` exists because of one missing client capability.** OpenCode sends the `lsp.*.initialization` block to the server correctly, but yaml-language-server's `initialized` handler throws on workspace-folder registration (OpenCode names a folder without declaring the capability) *before* it registers its settings listeners, so `customTags` never lands and every `!secret` is an error. The wrapper declares that capability in the `initialize` request and passes everything else through. If a future OpenCode declares it itself, the wrapper becomes a no-op, not a bug.
+- **The `opencode-mcp` bridge is third-party code running as root.** Exact version from `opencode_mcp_version`, `--ignore-scripts`, installed in `provision_async` (npm crashes under QEMU at build time), invoked as `node <path>` and never via `npx`. It is re-registered every boot. Don't loosen any of those; `tests/test_scripts.sh` pins three of them.
+- **The entity plugin must import only `node:` builtins.** Anything else makes OpenCode run an install at startup, which needs the network. It also must dedupe: OpenCode emits `session.status: busy` many times per turn, and a subagent session going idle is not the turn ending.
 - **Never let a non-essential step kill startup.** `set -e` is on, so intentional non-zero returns must be captured (`ensure_native_claude_usable || native_usable=$?`), not left bare. Since bashio 0.18 (base image, 2026-10-02) bashio also sets `inherit_errexit`, so a bare `x=$(bashio::config …)` exits the whole boot when the Supervisor API read fails — read survivable options through `config_or` or add `|| x=…`.
 - **No custom session UI.** tmux `new-session -A` handles reconnects; Claude Code's own `-c`/`-r` handle continue/resume.
 
@@ -98,12 +109,16 @@ All options are read via `bashio::config` (from `/data/options.json`):
 | `auto_launch_claude` | `get_claude_launch_command` |
 | `claude_auto_update` | `update_claude` |
 | `claude_version` | `claude_version_pin` → `update_claude` |
-| `dangerously_skip_permissions`, `claude_extra_args` | `build_claude_flags` & `claude-api-server.py` |
-| `ha_smart_context` | `generate_ha_context`, `start_context_refresh` |
+| `dangerously_skip_permissions`, `claude_extra_args` | `build_claude_flags` & `claude-api-server.py`; `dangerously_skip_permissions` also `setup_opencode` → `opencode-layers` |
+| `enable_opencode` | `setup_opencode`, `scripts/setup-opencode-mcp.sh`, `scripts/health-check.sh` |
+| `opencode_auto_update`, `opencode_version` | `update_opencode` |
+| `opencode_lsp` | `setup_opencode` → `opencode-layers` |
+| `enable_opencode_mcp`, `opencode_mcp_version` | `scripts/setup-opencode-mcp.sh` |
+| `ha_smart_context` | `generate_ha_context`, `start_context_refresh`, `setup_opencode` |
 | `ha_context_refresh_hours` | `start_context_refresh` |
 | `notify_on_completion`, `notify_after_seconds`, `notify_tts_target` | `scripts/claude-hooks.sh` |
-| `enable_ha_entities` | `start_entity_heartbeat`, `scripts/claude-hooks.sh`, `scripts/ha-entity.sh` |
-| `enable_ha_mcp`, `ha_mcp_version` | `scripts/setup-ha-mcp.sh` |
+| `enable_ha_entities` | `start_entity_heartbeat`, `scripts/claude-hooks.sh`, `scripts/ha-entity.sh`, `setup_opencode` (exports `CLAUDE_TERMINAL_OPENCODE_ENTITIES` for the plugin) |
+| `enable_ha_mcp`, `ha_mcp_version` | `scripts/setup-ha-mcp.sh`, `setup_opencode` → `opencode-layers` |
 | `enable_automation_api`, `automation_api_port`, `automation_api_key` | `start_automation_api` → `scripts/claude-api-server.py` |
 | `git_user_name`, `git_user_email` | `configure_git` |
 | `persistent_apk_packages`, `persistent_pip_packages` | `install_persistent_packages` |
@@ -120,14 +135,14 @@ All options are read via `bashio::config` (from `/data/options.json`):
 
 ### Script conventions
 - `#!/usr/bin/with-contenv bashio` for boot-path scripts (`run.sh`, `setup-ha-mcp.sh`, `health-check.sh`, `persist-install.sh`)
-- plain `#!/bin/bash` for scripts that run inside the user's terminal (`welcome.sh`, `ha-context.sh`, `tmux-status.sh`, `claude-login-url.sh`, `github-setup.sh`) — **no bashio there**; ttyd's environment doesn't provide it
+- plain `#!/bin/bash` for scripts that run inside the user's terminal (`welcome.sh`, `ha-context.sh`, `tmux-status.sh`, `claude-login-url.sh`, `github-setup.sh`, `terminal-session.sh`, `opencode-launch.sh`, `opencode-config.sh`, `opencode-layers.sh`) — **no bashio there**; ttyd's environment doesn't provide it
 - 4-space indent in shell, 2-space in YAML; credential files get 600 permissions
 - Errors report via `bashio::log.error` / `bashio::log.warning` and continue
 
 ## CI & Release
 
 Workflows in `.github/workflows/`:
-- **build-test.yml** (PRs touching `claude-terminal/**`) — hadolint + amd64/aarch64 builds, then amd64 smoke tests asserting specific scripts are executable, specific binaries exist, every bundled skill shipped with valid frontmatter, and the served `index.html` still contains both ttyd's client and the key bar. **Adding a script to `scripts/`, a skill to `skills/`, a blueprint to `blueprints/`, or a required binary means updating the lists in `ci/smoke.sh`.**
+- **build-test.yml** (PRs touching `claude-terminal/**`) — hadolint + amd64/aarch64 builds, then amd64 smoke tests asserting specific scripts are executable, specific binaries exist, every bundled skill shipped with valid frontmatter, the OpenCode plugin parses, and the served `index.html` still contains both ttyd's client and the key bar. **Adding a script to `scripts/`, a skill to `skills/`, a blueprint to `blueprints/`, or a required binary means updating the lists in `ci/smoke.sh`.**
 - **shellcheck.yml** (PRs touching `*.sh`) — severity `warning`, `-e SC1008 -e SC1091`
 - **security-scan.yml** — Trivy against the built image, on `claude-terminal/**` PRs, pushes to main and weekly. Reports HIGH/CRITICAL to the job summary, publishes **all** severities to the Security tab (the action ignores `severity:` for SARIF), and **fails** on a HIGH/CRITICAL that already has a fixed package — the one class a rebuild can act on. It is a gate, not a report: 132 alerts once accumulated across an entirely green history.
 - **publish-images.yml** — on `v*` tags (and manual dispatch), builds and pushes `ghcr.io/wetdognose/{arch}-addon-claude-terminal` via `home-assistant/builder` (pinned). The Supervisor pulls these; it does not build locally.

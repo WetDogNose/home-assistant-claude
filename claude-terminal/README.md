@@ -20,6 +20,7 @@ This app runs Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claud
 ## Features
 
 - **Just Claude Code**: opens straight into Claude — no menus in the way
+- **OpenCode as a second agent**: [OpenCode](https://opencode.ai/) in window 2 (`Ctrl+B 2`), pointed at any API endpoint or local model with `opencode-config` — or by asking Claude to set it up
 - **Automation API & Blueprint**: HTTP daemon (port 8128) and HA Blueprint for non-interactive Claude prompts
 - **Dashboard Generator**: `ha-dashboard` generates Lovelace YAML dashboards by area or entity domain
 - **Mesh & Battery Inspector**: `ha-mesh` scans Zigbee/Z-Wave/Matter signal quality and low battery levels

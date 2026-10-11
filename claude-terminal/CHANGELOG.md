@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.5.1-wdn.20
+
+OpenCode, as a second agent.
+
+- **[OpenCode](https://opencode.ai/) now runs beside Claude**, in window 2 of
+  the same terminal (`Ctrl-b 2`, and `Ctrl-b 1` to come back). It is not tied
+  to one provider, so it can use a local model, an aggregator or any other API
+  endpoint. It starts when you press Enter in its window, so it costs nothing
+  until then. Turn it off with `enable_opencode`.
+- **Claude sets it up for you.** Ask "point OpenCode at my Ollama server", or
+  run the new `opencode-config` command yourself. API keys are piped in and
+  stored in their own root-only files; they are never add-on options and never
+  written into the config file.
+- **OpenCode asks before editing files or running commands**, unlike its own
+  default. The add-on enforces this in a place a config file in `/config`
+  cannot override. `dangerously_skip_permissions` now applies to both agents.
+- **It knows your Home Assistant** the way Claude does: the same generated
+  context, the same Home Assistant MCP tools, the same bundled skills.
+- **MCP servers are shared.** Servers you have given Claude are passed on to
+  OpenCode at start, and `opencode-config mcp sync` refreshes them.
+- **Claude can hand work to OpenCode** through new `opencode_*` tools. This
+  uses `opencode-mcp`, a third-party package pinned to an exact version
+  (`opencode_mcp_version`). Read the caveats in the documentation, and turn
+  `enable_opencode_mcp` off if you would rather not run it.
+- **New entities**: `binary_sensor.opencode_busy`, `sensor.opencode_status`,
+  `sensor.opencode_last_run`, `sensor.opencode_last_result` and
+  `sensor.opencode_version`, controlled by the existing `enable_ha_entities`.
+- **Language servers in OpenCode** (`opencode_lsp`), with YAML set up so
+  `!secret` and `!include` are understood rather than flagged.
+- `claude-doctor` has an OpenCode section.
+- The image grows by the size of the OpenCode binary, about 190 MB. The
+  persistent copy, its language servers and the bridge are excluded from
+  backups; your OpenCode configuration and keys are included.
+
 ## 2.5.1-wdn.19
 
 Dependency refresh.

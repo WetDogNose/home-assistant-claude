@@ -41,6 +41,12 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `claude_version` | `""` | Pin Claude Code to `stable`, `latest`, or an exact `X.Y.Z`. Empty tracks the newest release. Use this if an upstream release will not run in this add-on — see below. |
 | `dangerously_skip_permissions` | `false` | Launch Claude with `--dangerously-skip-permissions` (no confirmation prompts). **Read the security note below.** |
 | `claude_extra_args` | `""` | Extra flags appended to every Claude launch, e.g. `--model claude-sonnet-5`. Values are split on spaces; quoted multi-word arguments are not supported. |
+| `enable_opencode` | `true` | Add [OpenCode](https://opencode.ai/) as a second agent in window 2 of the terminal. See [OpenCode](#opencode). |
+| `opencode_auto_update` | `true` | Refresh OpenCode in the background on every start. A new build only replaces the current one after it has been seen to run. |
+| `opencode_version` | `""` | Empty tracks the newest release; an exact `X.Y.Z` pins it. |
+| `opencode_lsp` | `true` | Language servers inside OpenCode: YAML that understands `!secret` and `!include`, shell and Python. Each is an extra process while OpenCode runs. |
+| `enable_opencode_mcp` | `true` | Give Claude tools for handing work to OpenCode. Uses the third-party `opencode-mcp` package; see [the caveats](#letting-claude-hand-work-to-opencode). |
+| `opencode_mcp_version` | `"3.0.0"` | Exact version of that package to install. Never updated automatically. |
 | `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
 | `ha_context_refresh_hours` | `24` | How often to rewrite that summary. Your system changes and a summary written once at startup slowly stops matching it. `0` writes it at startup only. |
 | `notify_on_completion` | `true` | Raise a Home Assistant notification when Claude finishes a long task or stops to ask you something — so you can start a job from your phone, put it down, and be told when it needs you. |
@@ -112,6 +118,7 @@ In practice that means you can ask for the outcome instead of the command: "why 
 | `claude-scheduled-tasks` | `claude-cron` |
 | `claude-terminal-notifications` | `claude-hooks`, `ha-entity`, telling you what Claude is doing |
 | `claude-terminal-sessions` | `claude-session`, `claude-usage` |
+| `opencode-config` | `opencode-config`, pointing OpenCode at an endpoint, sharing MCP servers, delegating to it |
 
 The shipped set is refreshed on every add-on start, so updates take effect and withdrawn skills are removed. Skills you write yourself in `~/.claude/skills/` are left untouched — including one that happens to share a name with a bundled skill, which wins and is kept.
 
@@ -286,6 +293,146 @@ look far more expensive than it was.
 A cost column is shown only where Claude Code recorded a cost. The add-on does
 not apply a price table of its own — a hardcoded rate would go stale silently
 and be believed anyway.
+
+## OpenCode
+
+[OpenCode](https://opencode.ai/) is a second coding agent that runs beside
+Claude in the same terminal. Unlike Claude Code it is not tied to one provider:
+it can use a local model on your own hardware, an aggregator, a company
+gateway, or any other API endpoint.
+
+It lives in **window 2** of the terminal. Press `Ctrl-b` then `2` to switch to
+it and `Ctrl-b` then `1` to come back; on a phone, use the key bar's Ctrl key,
+or `Ctrl-b h` for a menu. OpenCode starts when you press Enter in its window,
+so it uses no memory until you want it.
+
+### Setting it up
+
+The easiest way is to ask Claude, in window 1:
+
+> Point OpenCode at my Ollama server on 192.168.1.20 and use qwen2.5-coder.
+
+Claude runs `opencode-config` for you. You can run it yourself too:
+
+```bash
+# Any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, LiteLLM, most gateways)
+opencode-config set-provider ollama --base-url http://192.168.1.20:11434/v1 \
+    --name "Ollama" --model qwen2.5-coder:32b
+opencode-config set-model ollama/qwen2.5-coder:32b
+
+# With an API key: pipe it in, never type it as an argument
+printf '%s' "$KEY" | opencode-config set-provider mygateway \
+    --base-url https://llm.example.com/v1 --model my-model --api-key-stdin
+
+opencode-config test ollama     # is the endpoint reachable, how many models
+opencode-config validate        # OpenCode checks the whole configuration
+opencode-config show            # what is set, with secrets masked
+```
+
+Then restart OpenCode (`/exit` in window 2, then `opencode`).
+
+A local address has to be reachable from the add-on's container. `localhost`
+there is the add-on itself, not your PC or the Home Assistant host, so use the
+machine's LAN address.
+
+`opencode-config` covers base URL, key, headers and models. For anything else
+OpenCode supports — Azure resource names, Bedrock regions, per-model context
+limits, timeouts — edit `/data/.config/opencode/opencode.json` directly (ask
+Claude to), then run `opencode-config validate`.
+
+### Where the configuration lives
+
+| File | What it holds | Who writes it |
+|---|---|---|
+| `/data/.config/opencode/opencode.json` | Your providers, models and extra MCP servers | You and Claude |
+| `/data/.config/opencode/secrets/` | API keys, one file each, readable by root only | `opencode-config` |
+| `/config/opencode.json` (optional) | Your own overrides for this Home Assistant config | You |
+| add-on managed, rebuilt every start | Home Assistant tools and context, language servers, shared MCP servers, permissions | The add-on |
+
+Your files are included in Home Assistant backups, keys included, the same as
+Claude's own sign-in. API keys are deliberately **not** add-on options: the
+options file is plaintext and an options form could only offer the handful of
+fields it anticipated.
+
+**Permissions are set by the add-on and cannot be changed from a config file.**
+OpenCode asks before editing a file or running a command, unless you turn on
+`dangerously_skip_permissions`, which applies to both agents. This is enforced
+separately because the terminal works in `/config`, and without it an agent
+could switch off its own prompts by writing one file there.
+
+### What OpenCode knows about Home Assistant
+
+The same things Claude does: the generated Home Assistant context
+(`ha_smart_context`), the Home Assistant MCP tools (`enable_ha_mcp`) and the
+bundled skills. All the `ha-*` commands are on its PATH.
+
+### MCP servers
+
+Any MCP server you have given Claude — with `claude mcp add`, or in
+`/config/.mcp.json` — is passed on to OpenCode automatically when the add-on
+starts. After adding one, refresh OpenCode's copy without a restart of the
+add-on:
+
+```bash
+opencode-config mcp sync
+opencode-config mcp list        # each server, and where it came from
+```
+
+A server only OpenCode should have:
+
+```bash
+opencode-config mcp add myserver --url https://mcp.example.com/mcp
+opencode-config mcp add myserver --env KEY=value -- npx -y some-mcp-server
+```
+
+### Letting Claude hand work to OpenCode
+
+With `enable_opencode_mcp` on, Claude gets a set of `opencode_*` tools and can
+send a task to OpenCode and read the result — a second opinion from another
+model, or a job run on a cheaper or local one. Just ask: "get OpenCode's view on
+this automation".
+
+Three things to know before relying on it:
+
+- **It is third-party software.** The tools come from
+  [`opencode-mcp`](https://github.com/AlaeddineMessadi/opencode-mcp), a
+  community package maintained by one person. It is not made by Anthropic or by
+  the OpenCode project, and it runs with the same access as everything else in
+  this add-on. The add-on installs one exact version (`opencode_mcp_version`),
+  never the latest, and does not let it run install scripts. That pin does not
+  cover the package's own dependencies, which can still move within their
+  declared ranges. Turn `enable_opencode_mcp` off if you would rather not run
+  it; nothing else depends on it.
+- **Claude answers OpenCode's permission prompts.** A delegated task that
+  wants to edit a file or run a command stops and asks, and the answer comes
+  from Claude rather than from you. Claude still needs your approval to use the
+  OpenCode tool in the first place.
+- **It costs nothing when unused.** Nothing is started until Claude first uses
+  an OpenCode tool, and it only listens inside the container.
+
+### OpenCode as Home Assistant entities
+
+With `enable_ha_entities` on, OpenCode publishes its state alongside Claude's:
+
+| Entity | Tells you |
+|---|---|
+| `binary_sensor.opencode_busy` | OpenCode is working right now |
+| `sensor.opencode_status` | `idle`, `running`, `retrying`, `waiting` (it has asked for permission) or `error`; the model in use is an attribute |
+| `sensor.opencode_last_run` | When the last turn finished |
+| `sensor.opencode_last_result` | `ok` or `error`, with the error as an attribute |
+| `sensor.opencode_version` | The OpenCode version in use |
+
+They behave like the Claude entities above, including disappearing briefly
+when Home Assistant restarts. They cover tasks Claude delegates as well as
+your own use of window 2.
+
+### Language servers
+
+With `opencode_lsp` on, OpenCode checks files as it edits them. YAML is set up
+for Home Assistant, so `!secret`, `!include` and the other tags are understood
+instead of being reported as errors. The servers are downloaded the first time
+a matching file is opened, which needs internet access once, and are kept out
+of backups.
 
 ## Home Assistant MCP Integration
 
@@ -540,6 +687,11 @@ Read this before signing in — it grants real access.
 
 - **I never get completion notifications**: run `claude-hooks status`. The most common cause is `notify_after_seconds` (default 60) — short answers deliberately do not notify, so test with something that takes a minute, or lower the value. `claude-hooks test` sends one immediately down the same path. If the hooks are missing entirely, check the add-on log for `Could not install Claude Code hooks`, which means `~/.claude/settings.json` could not be written or is not valid JSON — the add-on refuses to overwrite a settings file it cannot parse.
 - **Two notifications for every scheduled job**: an older `~/.claude/settings.json` with hand-copied hooks in it. The add-on only manages entries whose command begins with `claude-hooks handle`; remove any duplicates you added yourself.
+- **OpenCode says it has no provider or no models**: nothing is configured yet. Ask Claude to set it up, or see [OpenCode](#opencode). `opencode-config test <id>` tells you whether the endpoint is reachable and whether the key was accepted.
+- **OpenCode cannot reach a model on my PC**: `localhost` inside the add-on is the add-on. Use the PC's LAN address, and check the model server listens on that address rather than only on its own loopback.
+- **A change to OpenCode's configuration did nothing**: it is read at start. `/exit` in window 2 and run `opencode` again. If you changed permissions in a file, that cannot work — see [Where the configuration lives](#where-the-configuration-lives).
+- **Window 2 is missing**: `enable_opencode` is off, or the session was created before you turned it on. Restart the add-on.
+- **Claude has no `opencode_*` tools**: run `claude-doctor`; its OpenCode section says whether the bridge is installed and registered. It is installed in the background on first start and needs internet access once.
 - **The `claude_terminal_*` entities are missing**: they vanish whenever Home Assistant Core restarts, because states created through the REST API are not persisted by Core. The add-on republishes them every five minutes — wait, or restart the add-on to publish immediately. If they never appear, check `enable_ha_entities` is on and run `ha-entity sync` in the terminal to see the error.
 - **A scheduled job runs but changes nothing**: see the warning under Scheduled tasks — without `dangerously_skip_permissions` a job cannot approve its own actions. `claude-cron output <id>` shows what it actually said.
 - **An automation gets no response from the API**: if it calls the API synchronously, it is almost certainly Home Assistant's `rest_command` 10-second default timeout rather than anything in the add-on. Use `"async": true` and trigger on the `claude_terminal_job_finished` event instead.

@@ -253,7 +253,7 @@ done
 # The skills exist to tell Claude which commands are available, so a skill
 # naming a command the add-on does not install is worse than no skill at all:
 # it sends Claude confidently at a command that is not there. Keep the two in
-# step by checking every ha-/claude-/esphome-/persist- token in a skill against
+# step by checking every ha-/claude-/esphome-/persist-/opencode- token in a skill against
 # what setup_commands actually puts in /usr/local/bin.
 INSTALLED_COMMANDS=$(grep -oE '"[a-z0-9-]+:/opt/scripts/' "$RUN_SH" | sed 's/"//; s/:.*//')
 SKILL_NAMES=$(basename -a "$SKILLS_DIR"/*/)
@@ -266,7 +266,7 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     # A token preceded by "/" is a path component (/config/claude-snapshots),
     # not a command being invoked, so it is excluded rather than reported as a
     # command that does not exist.
-    unknown=$(grep -oE '(^|[^/[:alnum:]_-])(ha|claude|esphome|persist)-[a-z-]+[a-z]' "${skill_dir}SKILL.md" \
+    unknown=$(grep -oE '(^|[^/[:alnum:]_-])(ha|claude|esphome|persist|opencode)-[a-z-]+[a-z]' "${skill_dir}SKILL.md" \
         | sed -E 's/^[^a-z]+//' | sort -u | while read -r token; do
             echo "$KNOWN_NAMES" | grep -qx "$token" || echo "$token"
         done)
@@ -1141,6 +1141,385 @@ fi
 
 rm -rf "$REVIEW_DIR"
 rm -f "$CRON_LIB"
+
+echo "29. Testing OpenCode"
+
+# One assertion = one command that must succeed. Never fed from a pipe, for the
+# reason given at the top of this file: a subshell would discard the counts.
+oc_assert() {
+    local desc="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc"
+        FAILED=$((FAILED + 1))
+    fi
+}
+oc_refute() {
+    local desc="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  [FAIL] $desc"
+        FAILED=$((FAILED + 1))
+    else
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    fi
+}
+file_mode() { ls -l "$1" | cut -c1-10; }
+
+OC_DIR=$(mktemp -d)
+OC_CONFIG="$SCRIPT_DIR/opencode-config.sh"
+OC_LAYERS="$SCRIPT_DIR/opencode-layers.sh"
+export OPENCODE_USER_CONFIG_DIR="$OC_DIR/user"
+export OPENCODE_RUN_DIR="$OC_DIR/run"
+export OPENCODE_ENFORCED_FILE="$OC_DIR/etc/opencode.json"
+export CLAUDE_JSON="$OC_DIR/claude.json"
+export CLAUDE_PROJECT_MCP="$OC_DIR/project-mcp.json"
+export HA_CONTEXT_FILE="$OC_DIR/CLAUDE.md"
+OC_USER="$OPENCODE_USER_CONFIG_DIR/opencode.json"
+OC_DEFAULTS="$OPENCODE_RUN_DIR/opencode-defaults.json"
+
+# --- opencode-config: the user layer -----------------------------------------
+
+# An API key belongs in its own 600 file. In the JSON it would be readable by
+# anything that can read the config, and would be printed by `cat`.
+printf 'sk-test-12345\n' | "$OC_CONFIG" set-provider lab \
+    --base-url https://llm.example.com/v1 --model big --header X-Org=acme --api-key-stdin >/dev/null
+oc_assert "set-provider writes the provider" \
+    jq -e '.provider.lab.options.baseURL == "https://llm.example.com/v1" and (.provider.lab.models | has("big"))' "$OC_USER"
+oc_assert "set-provider stores a {file:} reference, not the key" \
+    jq -e --arg ref "{file:$OPENCODE_USER_CONFIG_DIR/secrets/lab}" '.provider.lab.options.apiKey == $ref' "$OC_USER"
+oc_refute "the API key never reaches opencode.json" grep -q 'sk-test-12345' "$OC_USER"
+oc_assert "the key file holds the key" test "$(cat "$OPENCODE_USER_CONFIG_DIR/secrets/lab")" = "sk-test-12345"
+oc_assert "the key file is mode 600" test "$(file_mode "$OPENCODE_USER_CONFIG_DIR/secrets/lab")" = "-rw-------"
+oc_assert "a new provider defaults to the openai-compatible SDK" \
+    jq -e '.provider.lab.npm == "@ai-sdk/openai-compatible"' "$OC_USER"
+
+# --builtin is for a provider OpenCode already knows. Giving it an SDK package
+# would replace that provider's own implementation with a generic one.
+"$OC_CONFIG" set-provider anthropic --builtin --base-url https://gw.example.com/v1 >/dev/null
+oc_assert "--builtin sets no SDK package" jq -e '.provider.anthropic | has("npm") | not' "$OC_USER"
+
+# A key on the command line lands in shell history and the process list.
+oc_refute "an API key is refused as an argument" \
+    "$OC_CONFIG" set-provider bad --base-url https://x.example.com/v1 --api-key sk-nope
+oc_refute "the refused provider was not written" jq -e '.provider | has("bad")' "$OC_USER"
+
+oc_assert "show masks header values" \
+    test "$("$OC_CONFIG" show | jq -r '.provider.lab.options.headers["X-Org"]')" = "***"
+oc_assert "show keeps a {file:} reference readable" \
+    test "$("$OC_CONFIG" show | jq -r '.provider.lab.options.apiKey')" = "{file:$OPENCODE_USER_CONFIG_DIR/secrets/lab}"
+jq '.provider.inline = {options: {apiKey: "sk-inline-999"}}' "$OC_USER" > "$OC_USER.tmp" && mv "$OC_USER.tmp" "$OC_USER"
+oc_refute "show masks a key someone inlined by hand" sh -c "'$OC_CONFIG' show | grep -q sk-inline-999"
+
+# jq's // returns its right-hand side for false as well as null. A model flag
+# the user set to false must still be false after an unrelated edit.
+jq '.provider.lab.models.big = {tool_call: false}' "$OC_USER" > "$OC_USER.tmp" && mv "$OC_USER.tmp" "$OC_USER"
+"$OC_CONFIG" set-provider lab --model small >/dev/null
+oc_assert "an existing model's false flag survives a later edit" \
+    jq -e '.provider.lab.models.big.tool_call == false and (.provider.lab.models | has("small"))' "$OC_USER"
+oc_assert "editing a provider keeps its endpoint and key" \
+    jq -e '.provider.lab.options.baseURL == "https://llm.example.com/v1" and (.provider.lab.options.apiKey | startswith("{file:"))' "$OC_USER"
+oc_assert "each edit leaves a backup" test -s "$OC_USER.bak"
+
+"$OC_CONFIG" set-model lab/big >/dev/null
+oc_assert "set-model sets the default model" jq -e '.model == "lab/big"' "$OC_USER"
+oc_refute "set-model rejects a bare model name" "$OC_CONFIG" set-model big
+
+"$OC_CONFIG" mcp add remote1 --url https://mcp.example.com/mcp --header Authorization=tok >/dev/null
+"$OC_CONFIG" mcp add local1 --env A=b -- npx -y some-server --flag >/dev/null
+oc_assert "mcp add writes a remote server" \
+    jq -e '.mcp.remote1 == {type: "remote", url: "https://mcp.example.com/mcp", headers: {Authorization: "tok"}, enabled: true}' "$OC_USER"
+oc_assert "mcp add writes a local server with its arguments intact" \
+    jq -e '.mcp.local1.command == ["npx", "-y", "some-server", "--flag"] and .mcp.local1.environment.A == "b"' "$OC_USER"
+"$OC_CONFIG" mcp remove remote1 >/dev/null
+oc_assert "mcp remove removes only the named server" \
+    jq -e '(.mcp | has("remote1") | not) and (.mcp | has("local1"))' "$OC_USER"
+
+"$OC_CONFIG" remove-provider lab >/dev/null
+oc_assert "remove-provider removes the provider" jq -e '.provider | has("lab") | not' "$OC_USER"
+oc_refute "remove-provider deletes its key file" test -e "$OPENCODE_USER_CONFIG_DIR/secrets/lab"
+
+# A file that does not parse is the user's file mid-edit. Replacing it with a
+# fresh document would silently discard whatever they were writing.
+printf '{ "provider": { broken' > "$OC_USER"
+cp "$OC_USER" "$OC_DIR/broken.before"
+oc_refute "an unparseable config is refused" "$OC_CONFIG" set-model lab/big
+oc_refute "an unparseable config is refused before a key is read" \
+    sh -c "printf 'sk-orphan' | '$OC_CONFIG' set-provider orphan --base-url https://x.example.com/v1 --api-key-stdin"
+oc_assert "the unparseable config is left byte-identical" cmp -s "$OC_USER" "$OC_DIR/broken.before"
+oc_refute "no orphaned key file is left behind" test -e "$OPENCODE_USER_CONFIG_DIR/secrets/orphan"
+rm -f "$OC_USER"
+
+# --- opencode-layers: the enforced layer -------------------------------------
+
+# FAIL SAFE. Only an explicit "true" may remove OpenCode's confirmation
+# prompts; an option that could not be read arrives as something else.
+run_layers() { HOME="$OC_DIR/home" "$OC_LAYERS" "$@" 2>/dev/null; }
+
+run_layers write
+oc_assert "permissions are enforced by default" \
+    jq -e '.permission == {edit: "ask", bash: "ask"} and .autoupdate == false' "$OPENCODE_ENFORCED_FILE"
+OC_SKIP_PERMISSIONS="" run_layers write
+oc_assert "an unreadable (empty) option keeps the prompts" jq -e 'has("permission")' "$OPENCODE_ENFORCED_FILE"
+OC_SKIP_PERMISSIONS="yes" run_layers write
+oc_assert "anything but an explicit true keeps the prompts" jq -e 'has("permission")' "$OPENCODE_ENFORCED_FILE"
+OC_SKIP_PERMISSIONS="true" run_layers write
+oc_assert "dangerously_skip_permissions removes the prompts" \
+    jq -e '(has("permission") | not) and .autoupdate == false' "$OPENCODE_ENFORCED_FILE"
+
+# --- opencode-layers: the defaults layer -------------------------------------
+
+SUPERVISOR_TOKEN="tok-supervisor-secret" OC_HA_MCP=true OC_HA_MCP_VERSION=8.6.0 OC_HA_CONTEXT=true OC_LSP=true run_layers write
+oc_assert "ha-mcp is registered at the configured version" \
+    jq -e '.mcp["home-assistant"].command | index("ha-mcp@8.6.0") != null' "$OC_DEFAULTS"
+oc_assert "the Supervisor token is referenced, not embedded" \
+    jq -e '.mcp["home-assistant"].environment.HOMEASSISTANT_TOKEN == "{env:SUPERVISOR_TOKEN}"' "$OC_DEFAULTS"
+oc_refute "the Supervisor token never reaches the file" grep -rq 'tok-supervisor-secret' "$OPENCODE_RUN_DIR" "$OPENCODE_ENFORCED_FILE"
+oc_assert "the HA context file is loaded through instructions" \
+    jq -e --arg f "$HA_CONTEXT_FILE" '.instructions == [$f]' "$OC_DEFAULTS"
+oc_assert "the YAML server is routed through the wrapper with HA tags" \
+    jq -e '.lsp["yaml-ls"].command == ["opencode-yaml-ls"] and (.lsp["yaml-ls"].initialization.yaml.customTags | index("!secret scalar") != null)' "$OC_DEFAULTS"
+oc_assert "the defaults layer is mode 600" test "$(file_mode "$OC_DEFAULTS")" = "-rw-------"
+
+OC_HA_MCP=false OC_HA_CONTEXT=false OC_LSP=false run_layers write
+oc_assert "each default follows its option" \
+    jq -e '(has("mcp") | not) and (has("instructions") | not) and (has("lsp") | not)' "$OC_DEFAULTS"
+OC_HA_MCP=true OC_HA_MCP_VERSION='1.0; rm -rf /' run_layers write
+oc_assert "an invalid ha-mcp version falls back to the default" \
+    jq -e '.mcp["home-assistant"].command | index("ha-mcp@8.6.0") != null' "$OC_DEFAULTS"
+
+# --- opencode-layers: sharing Claude Code's MCP servers ----------------------
+
+cat > "$CLAUDE_JSON" << 'JSON'
+{
+  "mcpServers": {
+    "userscope": {"command": "npx", "args": ["-y", "u-server"], "env": {"K": "v"}},
+    "clash": {"command": "from-user"},
+    "opencode": {"command": "node", "args": ["bridge.js"]},
+    "home-assistant": {"command": "uvx", "args": ["ha-mcp"], "env": {"HOMEASSISTANT_TOKEN": "literal-token"}}
+  },
+  "projects": {
+    "/config": {"mcpServers": {"localscope": {"type": "http", "url": "https://l.example.com/mcp"}, "clash": {"command": "from-local"}}},
+    "/elsewhere": {"mcpServers": {"notmine": {"command": "nope"}}}
+  }
+}
+JSON
+cat > "$CLAUDE_PROJECT_MCP" << 'JSON'
+{"mcpServers": {
+  "projscope": {"type": "sse", "url": "https://p.example.com/sse", "headers": {"Authorization": "Bearer ${PROJ_TOKEN}"}},
+  "clash": {"command": "from-project"},
+  "weird": {"transport": "carrier-pigeon"}
+}}
+JSON
+run_layers write
+oc_assert "a stdio server becomes a local command array" \
+    jq -e '.mcp.userscope == {type: "local", command: ["npx", "-y", "u-server"], environment: {K: "v"}, enabled: true}' "$OC_DEFAULTS"
+oc_assert "an http server becomes a remote server" \
+    jq -e '.mcp.localscope == {type: "remote", url: "https://l.example.com/mcp", enabled: true}' "$OC_DEFAULTS"
+oc_assert "\${VAR} references are rewritten to {env:VAR}" \
+    jq -e '.mcp.projscope.headers.Authorization == "Bearer {env:PROJ_TOKEN}"' "$OC_DEFAULTS"
+oc_assert "project scope wins over local, which wins over user" \
+    jq -e '.mcp.clash.command == ["from-project"]' "$OC_DEFAULTS"
+# Copying the bridge would have OpenCode calling itself.
+oc_assert "the opencode bridge is never shared back into OpenCode" jq -e '.mcp | has("opencode") | not' "$OC_DEFAULTS"
+oc_refute "Claude's literal Home Assistant token is never copied" grep -q 'literal-token' "$OC_DEFAULTS"
+oc_assert "another project's servers are not shared" jq -e '.mcp | has("notmine") | not' "$OC_DEFAULTS"
+oc_assert "an untranslatable server is skipped, not guessed at" jq -e '.mcp | has("weird") | not' "$OC_DEFAULTS"
+oc_assert "the skip is reported by name" \
+    jq -e '.skipped == ["weird"] and (.shared | index("userscope") != null)' "$OPENCODE_RUN_DIR/opencode-mcp-shared.json"
+
+# An unreadable source must cost that source only -- never the whole layer.
+printf '{ not json' > "$CLAUDE_JSON"
+OC_HA_MCP=true run_layers write
+oc_assert "an unparseable .claude.json still yields a valid layer" \
+    jq -e '(.mcp | has("projscope")) and (.mcp | has("home-assistant")) and (.mcp | has("userscope") | not)' "$OC_DEFAULTS"
+
+# resync is what `opencode-config mcp sync` runs, from the user's terminal,
+# where there is no bashio to re-read the options with.
+OC_SKIP_PERMISSIONS=true OC_HA_MCP=true OC_LSP=true run_layers write
+rm -f "$OC_DEFAULTS" "$OPENCODE_ENFORCED_FILE"
+run_layers resync
+oc_assert "resync rebuilds the defaults layer from the recorded options" \
+    jq -e '(.mcp | has("home-assistant")) and has("lsp")' "$OC_DEFAULTS"
+oc_assert "resync preserves the recorded permission choice" \
+    jq -e 'has("permission") | not' "$OPENCODE_ENFORCED_FILE"
+rm -f "$OPENCODE_RUN_DIR/opencode-layers.env"
+oc_refute "resync without recorded options fails rather than guessing" run_layers resync
+
+unset OPENCODE_USER_CONFIG_DIR OPENCODE_RUN_DIR OPENCODE_ENFORCED_FILE CLAUDE_JSON CLAUDE_PROJECT_MCP HA_CONTEXT_FILE
+
+# --- ha-entity --agent opencode ----------------------------------------------
+
+# OpenCode's state must not land in Claude's file, and adding the flag must not
+# change what a flagless call does: every existing caller is flagless.
+OC_STATE="$OC_DIR/opencode-state.json"
+OC_CLAUDE_STATE="$OC_DIR/claude-state.json"
+SUPERVISOR_TOKEN="" OPENCODE_STATE_FILE="$OC_STATE" CLAUDE_STATE_FILE="$OC_CLAUDE_STATE" \
+    "$SCRIPT_DIR/ha-entity.sh" --agent opencode set busy=true status=running model=lab/big >/dev/null 2>&1
+oc_assert "--agent opencode writes its own state file" \
+    jq -e '.busy == true and .status == "running" and .model == "lab/big"' "$OC_STATE"
+oc_refute "--agent opencode leaves Claude's state file alone" test -e "$OC_CLAUDE_STATE"
+oc_assert "OpenCode's state has no login_required key" jq -e 'has("login_required") | not' "$OC_STATE"
+SUPERVISOR_TOKEN="" OPENCODE_STATE_FILE="$OC_STATE" CLAUDE_STATE_FILE="$OC_CLAUDE_STATE" \
+    "$SCRIPT_DIR/ha-entity.sh" set busy=false >/dev/null 2>&1
+oc_assert "a flagless call still writes Claude's state, with its own keys" \
+    jq -e '.busy == false and has("login_required") and has("last_source")' "$OC_CLAUDE_STATE"
+oc_assert "a flagless call leaves OpenCode's state alone" jq -e '.busy == true' "$OC_STATE"
+oc_refute "an unknown agent is rejected" "$SCRIPT_DIR/ha-entity.sh" --agent nope show
+oc_assert "the heartbeat republishes OpenCode's entities too" \
+    grep -q -- '--agent opencode sync' "$SCRIPT_DIR/ha-entity.sh"
+
+# --- the entity plugin -------------------------------------------------------
+
+OC_PLUGIN="$(dirname "$SCRIPT_DIR")/opencode/plugins/ha-entities.js"
+
+# A plugin with a non-builtin import makes OpenCode run an install at startup.
+if grep -E '^import ' "$OC_PLUGIN" | grep -vq 'from "node:'; then
+    echo "  [FAIL] the plugin imports something that is not a node: builtin"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] the plugin imports only node: builtins"
+    PASSED=$((PASSED + 1))
+fi
+
+if command -v node >/dev/null 2>&1; then
+    mkdir -p "$OC_DIR/bin"
+    cat > "$OC_DIR/bin/ha-entity" << STUB
+#!/bin/bash
+echo "\$*" >> "$OC_DIR/plugin-calls.log"
+STUB
+    chmod +x "$OC_DIR/bin/ha-entity"
+    cp "$OC_PLUGIN" "$OC_DIR/plugin.mjs"
+    cat > "$OC_DIR/drive.mjs" << 'JS'
+import { HaEntities } from "./plugin.mjs"
+const hooks = await HaEntities()
+const send = (type, properties) => hooks.event({ event: { type, properties } })
+const busy = (id) => send("session.status", { sessionID: id, status: { type: "busy" } })
+const steps = {
+  turn: async () => {
+    await busy("parent"); await busy("parent"); await busy("parent")
+    await send("message.updated", { info: { role: "assistant", providerID: "lab", modelID: "big" } })
+    await busy("child")
+    await send("session.idle", { sessionID: "child" })
+    await send("session.idle", { sessionID: "parent" })
+  },
+  error: async () => {
+    await busy("parent")
+    await send("session.error", { sessionID: "parent", error: { name: "APIError", data: { message: "boom\nline two" } } })
+    await send("session.idle", { sessionID: "parent" })
+  },
+  retry: async () => {
+    await busy("parent")
+    await send("session.status", { sessionID: "parent", status: { type: "retry", attempt: 1, message: "Cannot connect" } })
+  },
+  junk: async () => {
+    await hooks.event({})
+    await hooks.event({ event: null })
+    await send("session.status", null)
+  },
+}
+await steps[process.argv[2]]()
+await new Promise((resolve) => setTimeout(resolve, 400))
+JS
+    drive_plugin() {
+        rm -f "$OC_DIR/plugin-calls.log"
+        PATH="$OC_DIR/bin:$PATH" CLAUDE_TERMINAL_OPENCODE_ENTITIES=1 node "$OC_DIR/drive.mjs" "$1" >/dev/null 2>&1 || return 1
+        # The plugin publishes from DETACHED processes on purpose, so they can
+        # outlive the driver. Wait for the last expected call, bounded.
+        local tries=0
+        while [ -n "${2:-}" ] && [ "$tries" -lt 50 ] && ! grep -q -- "$2" "$OC_DIR/plugin-calls.log" 2>/dev/null; do
+            sleep 0.1
+            tries=$((tries + 1))
+        done
+        # Detached publishes can land out of order; let the stragglers finish.
+        sleep 0.3
+        return 0
+    }
+
+    drive_plugin turn "status=idle"
+    # OpenCode repeats "busy" many times a turn; each publish is a process and
+    # an HTTP POST to Home Assistant.
+    oc_assert "repeated busy events publish once" \
+        test "$(grep -c 'busy=true status=running' "$OC_DIR/plugin-calls.log")" = "1"
+    # A subagent is its own session and goes idle while its parent still works.
+    oc_assert "a subagent going idle does not report the turn as finished" \
+        test "$(grep -c 'status=idle' "$OC_DIR/plugin-calls.log")" = "1"
+    oc_assert "the finished turn reports ok and the model that ran it" \
+        grep -q -- '--agent opencode set busy=false status=idle last_result=ok last_error= last_run=.* model=lab/big' "$OC_DIR/plugin-calls.log"
+
+    drive_plugin error "status=error"
+    oc_assert "an error is reported with its message on one line" \
+        grep -q 'status=error last_result=error last_error=boom line two' "$OC_DIR/plugin-calls.log"
+    # A failed turn also goes idle, and must not then be rewritten as a success.
+    oc_refute "the idle after an error does not overwrite it with ok" \
+        grep -q 'last_result=ok' "$OC_DIR/plugin-calls.log"
+
+    drive_plugin retry "status=retrying"
+    oc_assert "a retry is reported as retrying, with the reason" \
+        grep -q 'busy=true status=retrying last_error=Cannot connect' "$OC_DIR/plugin-calls.log"
+
+    oc_assert "malformed events do not throw into OpenCode" drive_plugin junk
+
+    rm -f "$OC_DIR/plugin-calls.log"
+    PATH="$OC_DIR/bin:$PATH" CLAUDE_TERMINAL_OPENCODE_ENTITIES="" node "$OC_DIR/drive.mjs" turn >/dev/null 2>&1 || true
+    oc_refute "the plugin is inert unless the add-on enables it" test -s "$OC_DIR/plugin-calls.log"
+else
+    echo "  [SKIP] node not available; plugin behaviour not exercised"
+fi
+
+# --- terminal-session --------------------------------------------------------
+
+if command -v tmux >/dev/null 2>&1; then
+    OC_TMUX="$OC_DIR/tmux"
+    mkdir -p "$OC_TMUX/home" "$OC_TMUX/bin"
+    printf '#!/bin/bash\nsleep 300\n' > "$OC_TMUX/bin/opencode-launch"
+    chmod +x "$OC_TMUX/bin/opencode-launch"
+    session_windows() {
+        HOME="$OC_TMUX/home" TMUX_TMPDIR="$OC_TMUX" tmux list-windows -t "=$1" -F '#{window_name}' 2>/dev/null | tr '\n' ' '
+    }
+    start_session() {
+        HOME="$OC_TMUX/home" TMUX_TMPDIR="$OC_TMUX" PATH="$OC_TMUX/bin:$PATH" TMUX="" \
+            TERMINAL_SESSION_NO_ATTACH=1 TERMINAL_SESSION_NAME="$1" CLAUDE_TERMINAL_OPENCODE="$2" \
+            "$SCRIPT_DIR/terminal-session.sh" 'sleep 300'
+    }
+    start_session both 1
+    oc_assert "the session gets a Claude and an OpenCode window" test "$(session_windows both)" = "claude opencode "
+    # ttyd runs this for EVERY browser connection.
+    start_session both 1
+    oc_assert "reconnecting does not add windows" test "$(session_windows both)" = "claude opencode "
+    start_session solo ""
+    oc_assert "enable_opencode off means no OpenCode window" test "$(session_windows solo)" = "claude "
+    HOME="$OC_TMUX/home" TMUX_TMPDIR="$OC_TMUX" tmux kill-server >/dev/null 2>&1 || true
+else
+    echo "  [SKIP] tmux not available; terminal-session not exercised"
+fi
+
+# --- wiring ------------------------------------------------------------------
+
+oc_assert "run.sh main() sets OpenCode up at boot" grep -q '^    setup_opencode$' "$RUN_SH"
+oc_assert "ttyd launches through terminal-session" grep -q 'echo "terminal-session ' "$RUN_SH"
+oc_refute "no launch path still builds a bare one-window tmux command" grep -q 'echo "tmux new-session' "$RUN_SH"
+oc_assert "Dockerfile copies opencode/ into the image" grep -q '^COPY opencode/ /opt/opencode/$' "$DOCKERFILE"
+oc_assert "Dockerfile fails the build on an OpenCode binary that cannot relocate" \
+    grep -q "symbol not found|Error loading shared library' /tmp/opencode-ldd.txt" "$DOCKERFILE"
+# The bridge is third-party code running as root: exact version, no lifecycle
+# scripts, and never resolved through npx at session start.
+oc_assert "the MCP bridge is installed without lifecycle scripts" \
+    grep -q -- '--ignore-scripts' "$SCRIPT_DIR/setup-opencode-mcp.sh"
+oc_refute "the MCP bridge is never run through npx" grep -qE '^[^#]*\bnpx\b' "$SCRIPT_DIR/setup-opencode-mcp.sh"
+oc_assert "the bridge runs in background provisioning, not on the boot path" \
+    sh -c "sed -n '/^provision_async()/,/^}/p' '$RUN_SH' | grep -q 'setup_opencode_mcp'"
+oc_refute "the bridge is not called from main()" \
+    sh -c "sed -n '/^main()/,/^}/p' '$RUN_SH' | grep -q 'setup_opencode_mcp'"
+# update_opencode downloads; it must be backgrounded.
+oc_assert "the OpenCode update is backgrounded" \
+    sh -c "sed -n '/^update_opencode()/,/^}/p' '$RUN_SH' | grep -qE 'install_opencode_native .*\) &\$'"
+
+rm -rf "$OC_DIR"
 
 echo ""
 echo "=== Shell Script Test Summary ==="

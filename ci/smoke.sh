@@ -32,7 +32,10 @@ for s in /run.sh /opt/scripts/setup-ha-mcp.sh /opt/scripts/health-check.sh \
          /opt/scripts/ha-memory.sh /opt/scripts/claude-bot.sh \
          /opt/scripts/ha-git-backups.sh /opt/scripts/ha-entity.sh \
          /opt/scripts/claude-hooks.sh /opt/scripts/claude-usage.sh \
-         /opt/scripts/claude-session.sh; do
+         /opt/scripts/claude-session.sh /opt/scripts/terminal-session.sh \
+         /opt/scripts/opencode-launch.sh /opt/scripts/opencode-config.sh \
+         /opt/scripts/opencode-layers.sh /opt/scripts/opencode-yaml-ls.js \
+         /opt/scripts/setup-opencode-mcp.sh; do
   if [ -x "$s" ]; then echo "OK: $s"; else echo "FAIL: $s not executable"; rc=1; fi
 done
 exit $rc
@@ -62,7 +65,8 @@ rc=0
 for s in ha-config-safety ha-diagnostics ha-history ha-dashboards \
          ha-integration-dev ha-camera-vision ha-announce \
          claude-automation-api claude-scheduled-tasks \
-         claude-terminal-notifications claude-terminal-sessions; do
+         claude-terminal-notifications claude-terminal-sessions \
+         opencode-config; do
   f="/opt/skills/$s/SKILL.md"
   if [ ! -f "$f" ]; then echo "FAIL: $f missing"; rc=1; continue; fi
   # The frontmatter is the whole triggering mechanism: no name/description and
@@ -93,6 +97,29 @@ for b in claude_automation_query claude_terminal_ask \
   grep -q '^max_exceeded: silent$' "$f" || { echo "FAIL: $b does not silence the drop"; rc=1; continue; }
   echo "OK: $b"
 done
+exit $rc
+IN
+then rc=1; fi
+
+# OpenCode's state reaches Home Assistant through a plugin OpenCode loads from
+# the image. If it is missing nothing fails: OpenCode starts, works, and the
+# opencode_* entities simply sit at "idle" for ever.
+echo "== OpenCode plugin is present and parses =="
+if ! run <<'IN'
+rc=0
+f=/opt/opencode/plugins/ha-entities.js
+if [ ! -s "$f" ]; then echo "FAIL: $f missing or empty"; rc=1
+else
+  grep -q 'export const HaEntities' "$f" || { echo "FAIL: $f exports no plugin"; rc=1; }
+  # A plugin with imports outside node: builtins makes OpenCode run an install
+  # at startup, which needs the network.
+  if grep -E '^import ' "$f" | grep -vq 'from "node:'; then
+    echo "FAIL: $f imports something that is not a node: builtin"; rc=1
+  fi
+  cp "$f" /tmp/ha-entities.mjs && node --check /tmp/ha-entities.mjs || { echo "FAIL: $f does not parse"; rc=1; }
+  [ "$rc" -eq 0 ] && echo "OK: $f"
+fi
+node --check /opt/scripts/opencode-yaml-ls.js || { echo "FAIL: opencode-yaml-ls.js does not parse"; rc=1; }
 exit $rc
 IN
 then rc=1; fi
@@ -128,11 +155,11 @@ then rc=1; fi
 echo "== relocations resolve =="
 if ! run <<'IN'
 rc=0
-for b in claude gh ttyd tmux node jq curl uv git; do
+for b in claude opencode gh ttyd tmux node jq curl uv git; do
   p=$(command -v "$b") || { echo "FAIL: $b not found"; rc=1; continue; }
   out=$(ldd "$p" 2>&1 || true)
-  if printf '%s' "$out" | grep -q 'symbol not found'; then
-    echo "FAIL: $b has unresolved symbols:"; printf '%s\n' "$out" | grep 'symbol not found'; rc=1
+  if printf '%s' "$out" | grep -qE 'symbol not found|Error loading shared library'; then
+    echo "FAIL: $b has unresolved symbols or libraries:"; printf '%s\n' "$out" | grep -E 'symbol not found|Error loading shared library'; rc=1
   else echo "OK(ldd): $b"; fi
 done
 exit $rc
@@ -147,6 +174,7 @@ check() { n=$1; shift
   if out=$(timeout 30 "$@" 2>&1); then echo "OK: $n -> $(printf '%s' "$out" | head -1)"
   else echo "FAIL: $n did not run: $(printf '%s' "$out" | head -3)"; rc=1; fi; }
 check claude claude --version; check gh gh --version; check uv uv --version
+check opencode opencode --version
 check node node --version;     check npm npm --version; check git git --version
 check jq jq --version;         check tmux tmux -V;      check python3 python3 --version
 check yq yq --version
