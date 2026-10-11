@@ -288,7 +288,7 @@ cmd_set_provider() {
                     external="a credential saved by OpenCode's own sign-in"
                 else
                     local env_name
-                    env_name="$(printf '%s' "$id" | tr 'a-z' 'A-Z' | tr '.-' '__')_API_KEY"
+                    env_name="$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]' | tr '.-' '__')_API_KEY"
                     case "$env_name" in
                         [A-Z_]*) [ -n "${!env_name:-}" ] && external="the environment variable ${env_name}" ;;
                     esac
