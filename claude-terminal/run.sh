@@ -177,7 +177,12 @@ setup_commands() {
         "ha-entity:/opt/scripts/ha-entity.sh" \
         "claude-hooks:/opt/scripts/claude-hooks.sh" \
         "claude-usage:/opt/scripts/claude-usage.sh" \
-        "claude-session:/opt/scripts/claude-session.sh"; do
+        "claude-session:/opt/scripts/claude-session.sh" \
+        "terminal-session:/opt/scripts/terminal-session.sh" \
+        "opencode-launch:/opt/scripts/opencode-launch.sh" \
+        "opencode-config:/opt/scripts/opencode-config.sh" \
+        "opencode-layers:/opt/scripts/opencode-layers.sh" \
+        "opencode-yaml-ls:/opt/scripts/opencode-yaml-ls.js"; do
         name="${entry%%:*}"
         script="${entry#*:}"
         if [ -f "$script" ]; then
@@ -319,6 +324,15 @@ start_entity_heartbeat() {
         ha-entity set \
             "version=$(cat /opt/scripts/addon-version 2>/dev/null || echo unknown)" \
             busy=false status=idle >/dev/null 2>&1 || true
+        # OpenCode's entities, seeded the same way and for the same reason.
+        # Writing this state file is also what tells the heartbeat below to
+        # republish them. --version runs the binary, which is why this too
+        # stays inside the subshell.
+        if [ "${CLAUDE_TERMINAL_OPENCODE_ENTITIES:-}" = "1" ]; then
+            ha-entity --agent opencode set \
+                "version=$(timeout 10 opencode --version 2>/dev/null | head -1 || true)" \
+                busy=false status=idle >/dev/null 2>&1 || true
+        fi
         ha-entity heartbeat >/dev/null 2>&1 || true
     ) &
 }
@@ -564,6 +578,221 @@ update_claude() {
     ( install_claude_native "latest" || rm -f "$HOME/.local/bin/claude" ) &
 }
 
+# ---------------------------------------------------------------------------
+# OpenCode -- the second agent, set up the way Claude is.
+#
+# Two copies exist, exactly as for Claude and for the same reasons: the musl
+# binary baked into the image at /usr/local/bin/opencode (fallback, frozen at
+# build time) and the one this installs into /data/home/.local/bin (persists,
+# is refreshed in the background, wins via PATH). OpenCode's own updater is
+# switched off so that this -- which verifies a build runs BEFORE it reaches
+# PATH -- is the only way the binary ever changes.
+# ---------------------------------------------------------------------------
+
+native_opencode_runs() {
+    timeout 10 "$HOME/.local/bin/opencode" --version >/dev/null 2>&1
+}
+
+# Same contract as ensure_native_claude_usable: runs regardless of the
+# auto-update setting, because a broken +x binary shadows the working bundled
+# copy whether or not updates are on. Returns 0 if a usable persistent install
+# remains, 1 otherwise.
+ensure_native_opencode_usable() {
+    [ -x "$HOME/.local/bin/opencode" ] || return 1
+    if native_opencode_runs; then
+        return 0
+    fi
+    bashio::log.warning "Persistent OpenCode is present but fails to run; removing it and falling back to the bundled copy"
+    rm -f "$HOME/.local/bin/opencode"
+    return 1
+}
+
+install_opencode_native() {
+    local want="$1" pkg version tmp current
+
+    case "$(apk --print-arch)" in
+        # baseline: the default x64 build needs AVX2, which the older Celeron
+        # and Atom boxes Home Assistant commonly runs on do not have.
+        x86_64)  pkg="linux-x64-baseline-musl" ;;
+        aarch64) pkg="linux-arm64-musl" ;;
+        *) bashio::log.warning "No native OpenCode build for $(apk --print-arch)"; return 1 ;;
+    esac
+
+    if [ -z "$want" ] || [ "$want" = "latest" ]; then
+        version=$(curl -fsSL --connect-timeout 10 \
+            https://registry.npmjs.org/opencode-ai/latest 2>/dev/null \
+            | jq -r .version 2>/dev/null) || version=""
+    else
+        version="$want"
+    fi
+    if [ -z "$version" ] || [ "$version" = "null" ]; then
+        bashio::log.warning "Could not determine an OpenCode version to install"
+        return 1
+    fi
+
+    if [ -x "$HOME/.local/bin/opencode" ]; then
+        current=$(timeout 10 "$HOME/.local/bin/opencode" --version 2>/dev/null | head -1) || current=""
+        if [ "$current" = "$version" ]; then
+            bashio::log.info "OpenCode ${version} already installed"
+            return 0
+        fi
+    fi
+
+    tmp=$(mktemp -d) || return 1
+    if ! curl -fsSL --connect-timeout 10 \
+        "https://registry.npmjs.org/opencode-${pkg}/-/opencode-${pkg}-${version}.tgz" \
+        2>/dev/null | tar -xz -C "$tmp" package/bin/opencode 2>/dev/null; then
+        bashio::log.warning "Download of OpenCode ${version} failed"
+        rm -rf "$tmp"; return 1
+    fi
+    chmod 0755 "$tmp/package/bin/opencode"
+
+    # Verified in /tmp, before it can shadow the bundled copy on PATH.
+    if ldd "$tmp/package/bin/opencode" 2>&1 | grep -q 'symbol not found' \
+       || ! timeout 15 "$tmp/package/bin/opencode" --version >/dev/null 2>&1; then
+        bashio::log.warning "OpenCode ${version} does not run in this image; keeping the current copy"
+        rm -rf "$tmp"; return 1
+    fi
+
+    mkdir -p "$HOME/.local/bin"
+    mv -f "$tmp/package/bin/opencode" "$HOME/.local/bin/opencode"
+    rm -rf "$tmp"
+    bashio::log.info "OpenCode ${version} installed and verified"
+    return 0
+}
+
+update_opencode() {
+    local native_usable=0
+    ensure_native_opencode_usable || native_usable=$?
+
+    if [ "$(config_or 'opencode_auto_update' 'true')" != "true" ]; then
+        if [ "$native_usable" -eq 0 ]; then
+            bashio::log.info "OpenCode auto-update disabled; using persistent OpenCode"
+        else
+            bashio::log.info "OpenCode auto-update disabled; using bundled OpenCode"
+        fi
+        return 0
+    fi
+
+    local pin
+    pin=$(config_or 'opencode_version' '')
+    if [ -n "$pin" ] && ! echo "$pin" | grep -qE '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'; then
+        bashio::log.warning "Ignoring invalid opencode_version '${pin}' (expected: latest or X.Y.Z)"
+        pin=""
+    fi
+
+    # install_opencode_native only replaces the persistent copy once the new
+    # one has been seen to run, so a failed update needs no rollback.
+    bashio::log.info "Checking OpenCode ${pin:-latest} in background"
+    ( install_opencode_native "${pin:-latest}" || true ) &
+}
+
+# Write OpenCode's add-on-owned config layers and export the environment that
+# points OpenCode at them. See scripts/opencode-layers.sh for what the layers
+# are and why there are two.
+#
+# The exports matter as much as the files: this process becomes ttyd, so
+# everything exported here is inherited by tmux, by both windows, by Claude,
+# and by the `opencode serve` the MCP bridge starts on Claude's behalf.
+setup_opencode() {
+    if [ "$(config_or 'enable_opencode' 'true')" != "true" ]; then
+        bashio::log.info "OpenCode is disabled in options."
+        # Its state file is the heartbeat's cue to publish OpenCode entities.
+        rm -f /data/opencode-state.json
+        return 0
+    fi
+
+    export CLAUDE_TERMINAL_OPENCODE=1
+    export OPENCODE_DISABLE_AUTOUPDATE=1
+    # Do NOT load config from the working directory. That directory is
+    # /config, and OpenCode executes what it finds there without asking: a
+    # .opencode/plugins/*.js runs as root at startup, an opencode.json `mcp`
+    # entry's command is launched, and an agent file can grant itself
+    # `bash: allow`, outranking the enforced layer. Files reach /config from
+    # git clones, HACS, restored backups and network shares. Removing this
+    # reopens all three.
+    export OPENCODE_DISABLE_PROJECT_CONFIG=1
+    # The entity plugin lives in the image, not in /data: shipped state.
+    export OPENCODE_CONFIG_DIR=/opt/opencode
+
+    # FAIL SAFE, the mirror image of how build_claude_flags reads this option:
+    # only an explicit "true" removes OpenCode's confirmation prompts. An
+    # unreadable option must leave them on.
+    local skip
+    skip=$(bashio::config 'dangerously_skip_permissions' 'false' 2>/dev/null) || skip="false"
+    [ "$skip" = "true" ] || skip="false"
+
+    local ha_context ha_mcp
+    ha_context=$(config_or 'ha_smart_context' 'true')
+    ha_mcp=$(config_or 'enable_ha_mcp' 'true')
+    # Without a Supervisor token ha-mcp cannot authenticate; registering it
+    # would only give OpenCode a server that fails on every start.
+    [ -n "${SUPERVISOR_TOKEN:-}" ] || ha_mcp="false"
+
+    local rc=0
+    OC_SKIP_PERMISSIONS="$skip" \
+    OC_HA_MCP="$ha_mcp" \
+    OC_HA_MCP_VERSION="$(config_or 'ha_mcp_version' '8.6.0')" \
+    OC_HA_CONTEXT="$ha_context" \
+    OC_LSP="$(config_or 'opencode_lsp' 'true')" \
+    OC_SHARE_CLAUDE_MCP="true" \
+        opencode-layers write || rc=$?
+
+    case "$rc" in
+        0) ;;
+        1) bashio::log.warning "Could not write OpenCode's defaults layer; OpenCode will have no Home Assistant tools, shared MCP servers or language servers" ;;
+        # Everything else -- 2 and 3, but also 126/127 when the script itself
+        # is missing or not runnable -- means the enforced layer cannot be
+        # assumed to exist. Say so loudly rather than only for the codes that
+        # were anticipated.
+        *)
+            bashio::log.error "Could not write OpenCode's enforced config layer (opencode-layers exited ${rc})."
+            bashio::log.error "Its permission policy and language-server restrictions are NOT in the config file."
+            bashio::log.error "opencode-launch will apply the policy itself or refuse to start OpenCode."
+            ;;
+    esac
+
+    if [ -s /run/claude-terminal/opencode-defaults.json ]; then
+        export OPENCODE_CONFIG=/run/claude-terminal/opencode-defaults.json
+    fi
+
+    # The same policy a second way. The enforced file is read by OpenCode
+    # wherever it starts, but only if it was written; this is inherited by
+    # every start path -- window 2, a bare `opencode` at the shell, and the
+    # `opencode serve` the MCP bridge launches for Claude -- whether or not the
+    # file exists. An empty result (jq missing, script broken) must not be
+    # exported: an empty OPENCODE_PERMISSION is not "ask".
+    if [ "$skip" != "true" ]; then
+        local policy
+        policy=$(opencode-layers policy 2>/dev/null) || policy=""
+        if [ -n "$policy" ]; then
+            export OPENCODE_PERMISSION="$policy"
+        else
+            bashio::log.error "Could not compute OpenCode's permission policy for the environment."
+        fi
+    fi
+
+    # The HA context file is ~/.claude/CLAUDE.md, which OpenCode would also
+    # pick up through its Claude-compatibility fallback. It is loaded through
+    # `instructions` instead, so turn the fallback off or it arrives twice.
+    if [ "$ha_context" = "true" ]; then
+        export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1
+    fi
+
+    if [ "$(config_or 'enable_ha_entities' 'true')" = "true" ]; then
+        export CLAUDE_TERMINAL_OPENCODE_ENTITIES=1
+    else
+        rm -f /data/opencode-state.json
+    fi
+
+    if [ "$skip" = "true" ]; then
+        bashio::log.warning "dangerously_skip_permissions also applies to OpenCode: it will not ask before editing files or running commands."
+    fi
+    bashio::log.info "OpenCode configured (window 2 of the terminal; permissions: $([ "$skip" = "true" ] && echo allow || echo ask))"
+
+    update_opencode
+}
+
 # Install persistent packages from config and saved state
 install_persistent_packages() {
     local persist_config="/data/persistent-packages.json"
@@ -708,18 +937,19 @@ get_claude_launch_command() {
     # the opposite of require_ingress_user below, which must fail closed. Do not
     # collapse the two patterns together.
     if [ "$(config_or 'auto_launch_claude' 'true')" = "true" ]; then
-        # tmux -A attaches to the live session on browser reconnects and HA
-        # navigation instead of stacking new ones.
+        # terminal-session attaches to the live tmux session on browser
+        # reconnects and HA navigation instead of stacking new ones, and
+        # creates it -- with the OpenCode window, when enabled -- the first time.
         # claude-launch rather than claude: ttyd resolves this command on every
         # connection, so a binary broken by a background self-update after boot
         # would otherwise kill the tmux session instantly (the 2.5.1 symptom).
         # The wrapper probes, falls back to the bundled copy, and degrades to a
         # shell with an explanation rather than vanishing.
-        echo "tmux new-session -A -s claude 'claude-launch${flags:+ $flags}'"
+        echo "terminal-session 'claude-launch${flags:+ $flags}'"
     else
         # Shell mode: banner + interactive bash, still inside tmux for
         # reconnect persistence. Run 'claude' manually when ready.
-        echo "tmux new-session -A -s claude '/usr/local/bin/welcome --shell'"
+        echo "terminal-session '/usr/local/bin/welcome --shell'"
     fi
 }
 
@@ -735,6 +965,7 @@ provision_async() {
     local failed=""
     install_persistent_packages || failed="package installation"
     setup_ha_mcp                || failed="${failed:+$failed, }ha-mcp setup"
+    setup_opencode_mcp          || failed="${failed:+$failed, }OpenCode MCP bridge"
     generate_ha_context         || failed="${failed:+$failed, }HA context"
 
     if [ -n "$failed" ]; then
@@ -852,6 +1083,16 @@ setup_ha_mcp() {
         source /opt/scripts/setup-ha-mcp.sh
         configure_ha_mcp_server || bashio::log.warning "ha-mcp setup encountered issues but continuing..."
     fi
+}
+
+# Register OpenCode with Claude Code as an MCP server (the bridge that lets
+# Claude delegate to OpenCode). Runs in provision_async: it installs an npm
+# package on first boot and starts Claude twice.
+setup_opencode_mcp() {
+    [ -f "/opt/scripts/setup-opencode-mcp.sh" ] || return 0
+    # shellcheck source=/dev/null
+    source /opt/scripts/setup-opencode-mcp.sh
+    configure_opencode_mcp_bridge
 }
 
 # Start Automation API server for Home Assistant automations
@@ -1014,6 +1255,7 @@ main() {
 
     init_environment
     setup_commands
+    setup_opencode
     install_skills
     install_hooks
     update_claude

@@ -56,6 +56,7 @@ configuration:
       it changes files or controls your devices; it will simply go ahead. Only
       turn this on if you accept that anything Claude reads, including a web
       page or someone else's file, could trigger changes you never approved.
+      This also applies to OpenCode.
 
   claude_extra_args:
     name: Extra Claude options
@@ -63,6 +64,48 @@ configuration:
       Extra command-line options added every time Claude starts, for example
       --model claude-sonnet-5. Separate options with spaces; values containing
       spaces are not supported, even in quotes.
+
+  enable_opencode:
+    name: Add OpenCode as a second agent
+    description: >-
+      Adds OpenCode in a second window of the same terminal (Ctrl-b 2). It can
+      use any AI provider or your own local models. Ask Claude to set it up, or
+      run opencode-config in the terminal.
+
+  opencode_auto_update:
+    name: Keep OpenCode up to date
+    description: >-
+      Downloads the newest version of OpenCode in the background each time the
+      add-on starts. Turn this off to stay on the version you already have.
+
+  opencode_version:
+    name: OpenCode version
+    description: >-
+      Leave empty to always use the newest release. Enter an exact version such
+      as 1.18.35 to hold OpenCode at a known-good version if a new release
+      stops working.
+
+  opencode_lsp:
+    name: YAML checking in OpenCode
+    description: >-
+      Lets OpenCode check YAML as it edits it, with Home Assistant's own tags
+      such as !secret understood. Uses extra memory while OpenCode is running;
+      turn it off on a small device.
+
+  enable_opencode_mcp:
+    name: Let Claude hand work to OpenCode
+    description: >-
+      Gives Claude tools for sending a task to OpenCode and reading the result.
+      This uses opencode-mcp, a community package that is not made by
+      Anthropic or by the OpenCode project. Turn it off if you would rather
+      not run it.
+
+  opencode_mcp_version:
+    name: OpenCode bridge version
+    description: >-
+      The exact version of the opencode-mcp package to install, such as 3.0.0.
+      It is never updated automatically; change this only after checking the
+      new version.
 
   ha_smart_context:
     name: Tell Claude about your Home Assistant setup
