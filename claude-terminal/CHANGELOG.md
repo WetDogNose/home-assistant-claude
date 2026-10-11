@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.1-wdn.22
+
+- **The bar at the bottom of the terminal now says how to switch agents.** The
+  window you are not in is shown with its keys, for example
+  `Ctrl-b 2 opencode` while you are in Claude, and `Ctrl-b 1 claude` while you
+  are in OpenCode. Press `Ctrl-b`, release, then the number. Nothing changes
+  when OpenCode is turned off.
+- On a narrow screen, such as a phone, the bar drops its title and the date so
+  that hint still fits.
+
 ## 2.5.1-wdn.21
 
 Security fixes for `opencode-config`, the command Claude uses to configure
