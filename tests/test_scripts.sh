@@ -1274,8 +1274,14 @@ oc_assert "everything not known to be read-only asks" \
 oc_assert "the catch-all rule is written first" \
     jq -e '(.permission | keys_unsorted | .[0]) == "*"' "$OPENCODE_ENFORCED_FILE"
 # An agent-level permission block outranks the global one.
-oc_assert "the policy is repeated on each built-in agent" \
-    jq -e '.permission as $p | [.agent.build, .agent.plan, .agent.general] | all(.permission == $p)' "$OPENCODE_ENFORCED_FILE"
+# `explore` is the one that bites: any agent may spawn it, and OpenCode ships it
+# with `bash: allow` of its own.
+oc_assert "the policy is repeated on each built-in agent, explore included" \
+    jq -e '.permission as $p | [.agent.build, .agent.plan, .agent.general, .agent.explore] | all(.permission == $p)' "$OPENCODE_ENFORCED_FILE"
+# The policy is applied twice -- the enforced file and $OPENCODE_PERMISSION --
+# and the two must be the same object, in the same order.
+oc_assert "the environment policy is identical to the enforced file's" \
+    test "$("$OC_LAYERS" policy)" = "$(jq -c '.permission' "$OPENCODE_ENFORCED_FILE")"
 OC_SKIP_PERMISSIONS="" run_layers write
 oc_assert "an unreadable (empty) option keeps the prompts" jq -e 'has("permission")' "$OPENCODE_ENFORCED_FILE"
 OC_SKIP_PERMISSIONS="yes" run_layers write
@@ -1312,13 +1318,15 @@ cat > "$CLAUDE_JSON" << 'JSON'
   "mcpServers": {
     "userscope": {"command": "npx", "args": ["-y", "u-server"], "env": {"K": "v"}},
     "clash": {"command": "from-user"},
+    "switchedoff": {"command": "should-not-run"},
     "opencode": {"command": "node", "args": ["bridge.js"]},
     "home-assistant": {"command": "uvx", "args": ["ha-mcp"], "env": {"HOMEASSISTANT_TOKEN": "literal-token"}}
   },
   "projects": {
     "/config": {"mcpServers": {"localscope": {"type": "http", "url": "https://l.example.com/mcp"}, "clash": {"command": "from-local"}},
                 "enabledMcpjsonServers": ["projscope", "clash", "weird", "rejected"],
-                "disabledMcpjsonServers": ["rejected"]},
+                "disabledMcpjsonServers": ["rejected"],
+                "disabledMcpServers": ["switchedoff"]},
     "/elsewhere": {"mcpServers": {"notmine": {"command": "nope"}}}
   }
 }
@@ -1359,6 +1367,9 @@ oc_refute "an unapproved server's URL never reaches OpenCode's config" grep -q '
 oc_assert "a project server the user rejected is not shared" jq -e '.mcp | has("rejected") | not' "$OC_DEFAULTS"
 oc_assert "unapproved servers are reported by name" \
     jq -e '.unapproved == ["planted", "rejected"]' "$OPENCODE_RUN_DIR/opencode-mcp-shared.json"
+# Claude Code can switch off a server of any scope. Sharing must not switch it
+# back on in the other agent.
+oc_assert "a server disabled in Claude Code is not shared" jq -e '.mcp | has("switchedoff") | not' "$OC_DEFAULTS"
 # The approval must come from under $HOME. A settings file inside the project
 # could approve itself.
 mkdir -p "$OC_DIR/.claude"
@@ -1393,17 +1404,40 @@ oc_assert "resync preserves the recorded permission choice" \
 rm -f "$OPENCODE_RUN_DIR/opencode-layers.env"
 oc_refute "resync without recorded options fails rather than guessing" run_layers resync
 
-# `opencode-config test` writes the endpoint and headers into a curl config,
-# where a newline begins a new directive -- `output = <path>` is a file write.
+# `opencode-config test` hands values from a hand-editable file to curl. It
+# used to write them into a curl CONFIG, where a newline begins a new directive
+# and `output` is a file write -- and its guard used grep, which tests each
+# line separately, so `http://x\noutput=/path` (no space on the second line)
+# passed. Both halves are pinned: the refusal, and the mechanism.
 export OPENCODE_USER_CONFIG_DIR="$OC_DIR/user"
 mkdir -p "$OPENCODE_USER_CONFIG_DIR"
+oc_refuses_with() {
+    local desc="$1" expect="$2" out
+    out=$("$OC_CONFIG" test evil 2>&1) || true
+    case "$out" in
+        *"$expect"*) echo "  [PASS] $desc"; PASSED=$((PASSED + 1)) ;;
+        *) echo "  [FAIL] $desc (got: ${out})"; FAILED=$((FAILED + 1)) ;;
+    esac
+}
 jq -n --arg target "$OC_DIR/curl-wrote-this" \
-    '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: {"X-A": ("x\"\noutput = \"" + $target)}}}}}' > "$OC_USER"
-oc_refute "test refuses a header that would inject a curl directive" "$OC_CONFIG" test evil
-jq -n --arg target "$OC_DIR/curl-wrote-this" \
-    '{provider: {evil: {options: {baseURL: ("http://127.0.0.1:9/v1\"\noutput = \"" + $target)}}}}' > "$OC_USER"
-oc_refute "test refuses a baseURL that would inject a curl directive" "$OC_CONFIG" test evil
-oc_refute "no injected directive wrote a file" test -e "$OC_DIR/curl-wrote-this"
+    '{provider: {evil: {options: {baseURL: ("http://127.0.0.1:9/v1\noutput=" + $target)}}}}' > "$OC_USER"
+oc_refuses_with "test refuses a baseURL with an embedded newline and no space" "baseURL containing"
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1\" -o /tmp/x \""}}}}' > "$OC_USER"
+oc_refuses_with "test refuses a baseURL with quotes" "baseURL containing"
+jq -n '{provider: {evil: {options: {baseURL: "file:///etc/passwd"}}}}' > "$OC_USER"
+oc_refuses_with "test refuses a baseURL that is not http(s)" "not http(s)"
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: {"X-A": "a\r\nX-Injected: 1"}}}}}' > "$OC_USER"
+oc_refuses_with "test refuses a header value carrying a second header" "cannot be sent safely"
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: {"X-A\nX-B": "1"}}}}}' > "$OC_USER"
+oc_refuses_with "test refuses a header name with a newline" "cannot be sent safely"
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: ["not", "an", "object"]}}}}' > "$OC_USER"
+oc_refuses_with "test refuses headers that are not an object" "cannot be sent safely"
+oc_refute "nothing was written by an injected directive" test -e "$OC_DIR/curl-wrote-this"
+# An ordinary header with a space in its value must still be accepted: the
+# refusal has to come from the connection, not from validation.
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: {"X-Org": "acme corp"}}}}}' > "$OC_USER"
+oc_refuses_with "an ordinary header is not rejected by validation" "could not connect"
+oc_refute "opencode-config never feeds curl a config file" grep -qE 'curl[^#]* -K' "$OC_CONFIG"
 rm -f "$OC_USER"
 
 unset OPENCODE_USER_CONFIG_DIR OPENCODE_RUN_DIR OPENCODE_ENFORCED_FILE CLAUDE_JSON CLAUDE_PROJECT_MCP HA_CONTEXT_FILE CLAUDE_SETTINGS
@@ -1563,6 +1597,13 @@ oc_assert "run.sh main() sets OpenCode up at boot" grep -q '^    setup_opencode$
 # `bash: allow` over the enforced layer.
 oc_assert "OpenCode is told not to load config from /config" \
     grep -q '^    export OPENCODE_DISABLE_PROJECT_CONFIG=1$' "$RUN_SH"
+# The enforced file only helps where it was written and for config-driven
+# starts. The environment copy is inherited by every way OpenCode can start:
+# window 2, a bare `opencode`, and the server the MCP bridge launches.
+oc_assert "the policy is also exported through the environment" \
+    grep -q '^            export OPENCODE_PERMISSION="\$policy"$' "$RUN_SH"
+oc_assert "the environment policy is skipped only with the explicit option" \
+    sh -c "grep -B4 'policy=\$(opencode-layers policy' '$RUN_SH' | grep -q 'if \[ \"\$skip\" != \"true\" \]; then'"
 oc_assert "the YAML server is installed without lifecycle scripts" \
     grep -q -- '"--ignore-scripts"' "$SCRIPT_DIR/opencode-yaml-ls.js"
 oc_assert "ttyd launches through terminal-session" grep -q 'echo "terminal-session ' "$RUN_SH"

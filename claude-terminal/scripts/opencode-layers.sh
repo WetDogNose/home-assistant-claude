@@ -37,6 +37,7 @@
 #   opencode-layers write     Write both layers from OC_* environment variables
 #                             and record them for a later resync
 #   opencode-layers resync    Rewrite both layers from the recorded values
+#   opencode-layers policy    Print the permission policy as JSON
 #
 # Environment (write):
 #   OC_SKIP_PERMISSIONS  true = omit the permission block (allow by default)
@@ -123,7 +124,7 @@ translate_claude_mcp() {
     # Claude Code keeps them. Unreadable means "nothing approved".
     local approvals_state approvals_settings
     approvals_state=$(read_scope "$CLAUDE_JSON" '.projects[$dir]
-        | {enabledMcpjsonServers, disabledMcpjsonServers, enableAllProjectMcpServers}')
+        | {enabledMcpjsonServers, disabledMcpjsonServers, enableAllProjectMcpServers, disabledMcpServers}')
     approvals_settings=$(read_scope "$CLAUDE_SETTINGS" \
         '{enabledMcpjsonServers, disabledMcpjsonServers, enableAllProjectMcpServers}')
 
@@ -158,7 +159,10 @@ translate_claude_mcp() {
               | ($disabled | index($k)) == null
                 and ($all_enabled or ($enabled | index($k)) != null)))) as $project
         | ([$project_all | keys[] | select(. as $k | $project | has($k) | not)]) as $unapproved
-        | ($user + $local + $project) as $all
+        # disabledMcpServers is the off switch Claude Code keeps for a server
+        # of ANY scope. One the user turned off there must not come back on here.
+        | (names("disabledMcpServers")) as $off
+        | ($user + $local + $project | with_entries(select(.key as $k | ($off | index($k)) == null))) as $all
         | reduce ($all | to_entries[]) as $e ({servers: {}, skipped: [], unapproved: $unapproved};
             if $e.key == "opencode" or $e.key == "home-assistant" then .
             else ($e.value | if type == "object" then translate else null end) as $t
@@ -167,33 +171,50 @@ translate_claude_mcp() {
             end)'
 }
 
+# The permission policy, as one JSON object. Printed by `opencode-layers
+# policy` as well as written into the enforced layer, because it is applied
+# through TWO mechanisms that must not drift apart:
+#
+#   /etc/opencode/opencode.json   wins over every config file, and can pin the
+#                                 built-in agents individually
+#   $OPENCODE_PERMISSION          exported by run.sh; inherited by every way
+#                                 OpenCode can be started -- window 2, a bare
+#                                 `opencode` typed at the shell, and the
+#                                 `opencode serve` the MCP bridge starts for
+#                                 Claude -- and still in force if the file
+#                                 above could not be written
+#
+# The policy is "ask, except for tools that only read". OpenCode's own default
+# allows everything, and gating only edit and bash would still leave web
+# fetches and every MCP tool -- including the Home Assistant ones, which can
+# switch devices and restart Core -- running unprompted. Order matters:
+# OpenCode applies the LAST matching rule, so the catch-all comes first.
+POLICY_FILTER='
+    {"*": "ask",
+     read: "allow", glob: "allow", grep: "allow", list: "allow", lsp: "allow",
+     todoread: "allow", todowrite: "allow", skill: "allow", task: "allow",
+     question: "allow",
+     edit: "ask", bash: "ask", external_directory: "ask"}'
+
 build_enforced() {
     local skip="$1"
     # Fail SAFE: only an explicit "true" removes the prompts. An option that
     # could not be read arrives here as anything else and keeps them.
     #
-    # The policy is "ask, except for tools that only read". OpenCode's own
-    # default allows everything, and gating only edit and bash would still
-    # leave web fetches and every MCP tool -- including the Home Assistant
-    # ones, which can switch devices and restart Core -- running unprompted.
-    # Order matters: OpenCode applies the LAST matching rule, so the catch-all
-    # comes first.
-    #
-    # It is repeated under each built-in agent because an agent-level
-    # permission block outranks the global one; without that, a `build` agent
-    # redefined in the user layer would shed the policy.
-    jq -n --arg skip "$skip" '
-        {"*": "ask",
-         read: "allow", glob: "allow", grep: "allow", list: "allow", lsp: "allow",
-         todoread: "allow", todowrite: "allow", skill: "allow", task: "allow",
-         question: "allow",
-         edit: "ask", bash: "ask", external_directory: "ask"} as $policy
-        | {"$schema": "https://opencode.ai/config.json", autoupdate: false}
-        + (if $skip == "true" then {}
-           else {permission: $policy,
-                 agent: {build: {permission: $policy},
-                         plan: {permission: $policy},
-                         general: {permission: $policy}}} end)'
+    # The policy is repeated under each built-in agent that can use tools,
+    # because an agent-level permission block outranks the global one. That
+    # matters twice over: a `build` redefined in the user layer would otherwise
+    # shed the policy, and `explore` -- which any agent may spawn, since `task`
+    # is allowed -- ships with `bash: allow` of its own.
+    jq -n --arg skip "$skip" "
+        (${POLICY_FILTER}) as \$policy
+        | {\"\$schema\": \"https://opencode.ai/config.json\", autoupdate: false}
+        + (if \$skip == \"true\" then {}
+           else {permission: \$policy,
+                 agent: {build: {permission: \$policy},
+                         plan: {permission: \$policy},
+                         general: {permission: \$policy},
+                         explore: {permission: \$policy}}} end)"
 }
 
 build_defaults() {
@@ -359,11 +380,14 @@ case "${1:-}" in
         normalise_inputs
         write_layers
         ;;
+    policy)
+        jq -nc "$POLICY_FILTER"
+        ;;
     -h|--help|help)
         sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
         ;;
     *)
-        echo "Usage: opencode-layers write|resync" >&2
+        echo "Usage: opencode-layers write|resync|policy" >&2
         exit 1
         ;;
 esac

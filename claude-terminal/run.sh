@@ -752,6 +752,22 @@ setup_opencode() {
         export OPENCODE_CONFIG=/run/claude-terminal/opencode-defaults.json
     fi
 
+    # The same policy a second way. The enforced file is read by OpenCode
+    # wherever it starts, but only if it was written; this is inherited by
+    # every start path -- window 2, a bare `opencode` at the shell, and the
+    # `opencode serve` the MCP bridge launches for Claude -- whether or not the
+    # file exists. An empty result (jq missing, script broken) must not be
+    # exported: an empty OPENCODE_PERMISSION is not "ask".
+    if [ "$skip" != "true" ]; then
+        local policy
+        policy=$(opencode-layers policy 2>/dev/null) || policy=""
+        if [ -n "$policy" ]; then
+            export OPENCODE_PERMISSION="$policy"
+        else
+            bashio::log.error "Could not compute OpenCode's permission policy for the environment."
+        fi
+    fi
+
     # The HA context file is ~/.claude/CLAUDE.md, which OpenCode would also
     # pick up through its Claude-compatibility fallback. It is loaded through
     # `instructions` instead, so turn the fallback off or it arrives twice.

@@ -444,44 +444,57 @@ cmd_test() {
 
     base_url=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
     [ -n "$base_url" ] || die "provider '${id}' has no baseURL in ${CONFIG_FILE}."
-    # Everything below is written into a curl config, where a newline starts a
-    # new directive (`output = ...` would be a file write) and a quote ends the
-    # value. These come from a file that may have been edited by hand, so
-    # refuse rather than escape and hope.
+    key_ref=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.apiKey // empty')
+    key=$(resolve_secret "$key_ref")
+
+    # These values come from a file that may have been edited by hand, and
+    # they are about to be handed to curl. Checked with `case`, which sees the
+    # whole string: a line-oriented tool such as grep tests each line
+    # separately, so a value with an embedded newline passes it.
     case "$base_url" in
         http://*|https://*) ;;
         *) die "provider '${id}' has a baseURL that is not http(s)." ;;
     esac
-    if printf '%s' "$base_url" | grep -q '[[:cntrl:]"\\[:space:]]'; then
-        die "provider '${id}' has a baseURL containing quotes, backslashes, spaces or control characters."
-    fi
-    if printf '%s' "$current" | jq -e --arg id "$id" '
-        (.provider[$id].options.headers // {}) | to_entries
-        | any((.key | test("^[A-Za-z0-9-]+$") | not)
-              or (.value | tostring | test("[\\x00-\\x1f]")))' >/dev/null 2>&1; then
+    case "$base_url" in
+        *[[:cntrl:][:space:]\"\\]*)
+            die "provider '${id}' has a baseURL containing quotes, backslashes, spaces or control characters."
+            ;;
+    esac
+    case "$key" in
+        *[[:cntrl:]]*) die "the API key for '${id}' contains control characters." ;;
+    esac
+    # A header is one line. A CR or LF inside a name or value would smuggle a
+    # second header into the request.
+    if ! printf '%s' "$current" | jq -e --arg id "$id" '
+        (.provider[$id].options.headers // {})
+        | if type != "object" then false
+          else all(to_entries[];
+                   (.key | test("^[A-Za-z0-9-]+$"))
+                   and (.value | type == "string" or type == "number" or type == "boolean")
+                   and (.value | tostring | test("[\\x00-\\x1f\\x7f]") | not))
+          end' >/dev/null 2>&1; then
         die "provider '${id}' has a header name or value that cannot be sent safely."
     fi
-    key_ref=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.apiKey // empty')
-    key=$(resolve_secret "$key_ref")
 
-    # Passed to curl as a config on stdin rather than as arguments, so neither
-    # the key nor a header value is visible in the process list.
-    local body status key_escaped
+    # Headers go to curl in a FILE (-H @file), one per line, and the URL as an
+    # ordinary argument after `--`. The key must stay out of the process list,
+    # but a curl *config* is the wrong tool for that: in its syntax a newline
+    # starts a new directive and `output` is a file write, so anything that
+    # slipped past validation became an arbitrary-write primitive. A header
+    # file can only ever hold headers.
+    local body headers status
     body=$(mktemp) || return 1
-    # Backslash and double quote are the two characters curl's config syntax
-    # treats specially inside a quoted value.
-    case "$key" in
-        *[[:cntrl:]]*) rm -f "$body"; die "the API key for '${id}' contains control characters." ;;
-    esac
-    key_escaped=${key//\\/\\\\}
-    key_escaped=${key_escaped//\"/\\\"}
-    status=$({
-        printf 'url = "%s/models"\n' "${base_url%/}"
-        [ -n "$key" ] && printf 'header = "Authorization: Bearer %s"\n' "$key_escaped"
+    headers=$(mktemp) || { rm -f "$body"; return 1; }
+    chmod 600 "$headers"
+    {
+        [ -n "$key" ] && printf 'Authorization: Bearer %s\n' "$key"
         printf '%s' "$current" | jq -r --arg id "$id" '
-            (.provider[$id].options.headers // {}) | to_entries[]
-            | "header = \"\(.key): \(.value | tostring | gsub("\\\\"; "\\\\") | gsub("\""; "\\\""))\""'
-    } | curl -sS -m 15 -o "$body" -w '%{http_code}' -K - 2>/dev/null) || status="000"
+            (.provider[$id].options.headers // {}) | to_entries[] | "\(.key): \(.value | tostring)"'
+    } > "$headers"
+
+    status=$(curl -sS -m 15 -o "$body" -w '%{http_code}' -H "@${headers}" \
+        -- "${base_url%/}/models" 2>/dev/null) || status="000"
+    rm -f "$headers"
 
     local rc=0
     case "$status" in

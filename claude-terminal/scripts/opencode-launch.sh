@@ -64,6 +64,15 @@ banner() {
 # allow-by-default permissions, and that must be said where it will be read.
 warn_if_unenforced() {
     [ -s "$ENFORCED_FILE" ] && return 0
+    if [ -n "${OPENCODE_PERMISSION:-}" ]; then
+        # The environment copy of the policy still applies; what is lost is
+        # the per-agent pinning only the file can do.
+        echo -e "  ${YELLOW}The add-on's permission file for OpenCode is missing.${NC}"
+        echo -e "  ${DIM}Prompts are still on, but a subagent may run commands without asking.${NC}"
+        echo -e "  ${DIM}Restart the add-on and check its log.${NC}"
+        echo ""
+        return 0
+    fi
     echo -e "  ${YELLOW}The add-on's permission settings for OpenCode are missing.${NC}"
     echo -e "  ${DIM}OpenCode will edit files and run commands without asking.${NC}"
     echo -e "  ${DIM}Restart the add-on and check its log if this is not what you want.${NC}"

@@ -61,7 +61,12 @@ Where they disagree, this section is what shipped.
   fetches and all MCP tools, including Home Assistant's, unprompted.
 - **`/config/.mcp.json` servers are shared only when Claude Code has approved
   them**, read from files under `$HOME` and failing closed.
-- **`opencode-config test`** refuses values that would inject a curl directive.
+- **The policy also covers `explore`** (spawnable by any agent, ships with
+  `bash: allow`) and is exported as `OPENCODE_PERMISSION`, so it holds on every
+  start path and when the enforced file could not be written.
+- **A server disabled in Claude Code** (`disabledMcpServers`) is not shared.
+- **`opencode-config test`** passes headers to curl in a header file, not a
+  curl config, and validates with whole-string matching.
 - **`opencode-yaml-ls`** installs the YAML server with `--ignore-scripts`.
 
 ## 1. Binary
