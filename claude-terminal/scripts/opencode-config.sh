@@ -109,6 +109,25 @@ reject_reference() {
     esac
 }
 
+# The NAME half of a --header or --env pair. It becomes a JSON key, and
+# OpenCode expands a reference in a key exactly as it does in a value: a
+# header NAMED {env:SUPERVISOR_TOKEN} sends the token to that server as the
+# name of a header. Checking only the value was the same "subset of the
+# fields" mistake reject_reference exists to end, so names are held to what a
+# header or a variable name can legitimately be. `case`, not grep: grep tests
+# each line separately and would pass a name with an embedded newline.
+valid_header_name() {
+    case "$2" in
+        ''|*[!A-Za-z0-9-]*) die "$1 name '$(printf '%s' "$2" | tr -c 'A-Za-z0-9_.:{}-' '?' | cut -c1-40)' is not valid: letters, digits and '-' only." ;;
+    esac
+}
+
+valid_env_name() {
+    case "$2" in
+        ''|[0-9]*|*[!A-Za-z0-9_]*) die "$1 name '$(printf '%s' "$2" | tr -c 'A-Za-z0-9_.:{}-' '?' | cut -c1-40)' is not valid: letters, digits and '_' only, not starting with a digit." ;;
+    esac
+}
+
 # scheme://host[:port] of a URL, lower-cased, for deciding whether an endpoint
 # has moved. Anything before an @ stays in: https://good.example@evil.example
 # must not compare equal to https://good.example.
@@ -161,6 +180,22 @@ update_config() {
 
 restart_note() {
     echo "Restart OpenCode for this to take effect."
+}
+
+# Stop the `opencode serve` the MCP bridge runs for Claude. It read the layers
+# once, at start, so after a resync it would carry on with the old ones -- and
+# unlike window 2 there is nothing for the user to restart. The bridge starts a
+# new one on Claude's next OpenCode call (OPENCODE_AUTO_SERVE; read in
+# opencode-mcp 3.0.0's client.js). The pattern is anchored so it cannot match
+# the TUI, or this script.
+restart_serve() {
+    local pattern='(^|/)opencode serve( |$)'
+    pgrep -f "$pattern" >/dev/null 2>&1 || return 0
+    if pkill -f "$pattern" >/dev/null 2>&1; then
+        echo "Stopped the OpenCode server behind Claude's opencode tools; it restarts with the new layers on the next call."
+    else
+        echo "Could not stop the running 'opencode serve'; it keeps the old layers until it is restarted."
+    fi
 }
 
 # Mask anything that is, or may be, a credential. A {env:..} or {file:..}
@@ -247,6 +282,7 @@ cmd_set_provider() {
             ?*=*) ;;
             *) die "--header expects NAME=value, got '${header}'." ;;
         esac
+        valid_header_name "--header" "${header%%=*}"
         reject_reference "--header" "${header#*=}"
         pair_json=$(jq -nc --arg k "${header%%=*}" --arg v "${header#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')
@@ -440,12 +476,14 @@ cmd_mcp_add() {
     local pair pair_json env_json='{}' headers_json='{}' command_json='[]'
     for pair in ${envs[@]+"${envs[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--env expects NAME=value, got '${pair}'." ;; esac
+        valid_env_name "--env" "${pair%%=*}"
         reject_reference "--env" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         env_json=$(jq -nc --argjson a "$env_json" --argjson b "$pair_json" '$a + $b')
     done
     for pair in ${headers[@]+"${headers[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--header expects NAME=value, got '${pair}'." ;; esac
+        valid_header_name "--header" "${pair%%=*}"
         reject_reference "--header" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')
@@ -494,6 +532,7 @@ cmd_mcp_sync() {
                (if ((.unapproved // []) | length) > 0 then "Not shared (in /config/.mcp.json but not approved in Claude Code): \(.unapproved | join(", "))\n  Start Claude in /config and approve the server there first." else empty end)' \
             "$SHARED_REPORT"
     fi
+    restart_serve
     restart_note
 }
 
