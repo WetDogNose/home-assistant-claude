@@ -105,8 +105,12 @@ section_system_info() {
     echo "- **Home Assistant**: ${ha_version}"
     [ -n "$machine" ] && echo "- **Machine**: ${machine}"
     [ -n "$ha_os" ] && echo "- **OS**: ${ha_os}"
-    [ -n "$hostname" ] && echo "- **Hostname**: ${hostname}"
-    [ -n "$location_name" ] && echo "- **Location**: ${location_name}"
+    # One line each: this file is loaded as instructions in every session,
+    # and a name is free text.
+    hostname="${hostname//[$'\r\n\t']/ }"
+    location_name="${location_name//[$'\r\n\t']/ }"
+    [ -n "$hostname" ] && echo "- **Hostname**: ${hostname:0:80}"
+    [ -n "$location_name" ] && echo "- **Location**: ${location_name:0:80}"
     [ -n "$timezone" ] && echo "- **Timezone**: ${timezone}"
 }
 
@@ -208,13 +212,17 @@ section_addons() {
     fi
 
     local addons
+    # A title is free text set by whatever created the entity -- MQTT
+    # discovery will do -- and this file is loaded as instructions in every
+    # session. Without `line` an embedded newline started a line of its own.
     addons=$(echo "$states" | jq -r '
+        def line: tostring | gsub("[\\r\\n\\t]+"; " ") | .[0:80];
         [ .[]
           | select(.entity_id | startswith("update."))
           | select(.attributes.installed_version != null)
           | select(.entity_id | test("home_assistant_(core|supervisor|operating_system)") | not)
-          | "- \(.attributes.title // .attributes.friendly_name // .entity_id) v\(.attributes.installed_version)"
-            + (if .state == "on" then " (update available: \(.attributes.latest_version))" else "" end)
+          | "- \(.attributes.title // .attributes.friendly_name // .entity_id | line) v\(.attributes.installed_version | line)"
+            + (if .state == "on" then " (update available: \(.attributes.latest_version | line))" else "" end)
         ] | sort | .[]
     ' 2>/dev/null)
 

