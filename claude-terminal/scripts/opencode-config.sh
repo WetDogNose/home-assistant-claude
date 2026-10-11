@@ -88,10 +88,13 @@ reserved_env() {
 }
 
 # OpenCode expands {env:NAME} and {file:PATH} wherever they appear in its
-# config. In a header or an MCP environment value that turns "store this text"
-# into "read this secret and send it" -- a header of {env:SUPERVISOR_TOKEN} on
-# a provider is the Home Assistant token delivered to that provider. API keys
-# have their own flags; nothing else needs a reference.
+# config -- not only in the fields meant for secrets. That turns "store this
+# text" into "read this secret and send it": a header of
+# {env:SUPERVISOR_TOKEN} is the Home Assistant token delivered to that
+# provider, and so is a base URL of https://host/{env:SUPERVISOR_TOKEN}/v1.
+# EVERY value this command accepts from its caller goes through here; the only
+# way to create a reference is --api-key-stdin / --api-key-env, which build it
+# themselves. Checking a subset of the fields was the bug.
 reject_reference() {
     case "$2" in
         *"{env:"*|*"{file:"*)
@@ -100,10 +103,12 @@ reject_reference() {
     esac
 }
 
-# scheme://host[:port] of a URL, for deciding whether an endpoint has moved.
+# scheme://host[:port] of a URL, lower-cased, for deciding whether an endpoint
+# has moved. Anything before an @ stays in: https://good.example@evil.example
+# must not compare equal to https://good.example.
 url_origin() {
     local rest="${1#*://}"
-    printf '%s://%s' "${1%%://*}" "${rest%%/*}"
+    printf '%s://%s' "${1%%://*}" "${rest%%[/?#]*}" | tr '[:upper:]' '[:lower:]'
 }
 
 # Print the user layer, or the empty document when there is none yet.
@@ -205,6 +210,15 @@ cmd_set_provider() {
         ''|http://*|https://*) ;;
         *) die "--base-url must start with http:// or https://." ;;
     esac
+    case "$base_url" in
+        *[[:cntrl:][:space:]\"\\]*) die "--base-url may not contain quotes, backslashes, spaces or control characters." ;;
+    esac
+    reject_reference "--base-url" "$base_url"
+    reject_reference "--name" "$name"
+    local model_arg
+    for model_arg in ${models[@]+"${models[@]}"}; do
+        reject_reference "--model" "$model_arg"
+    done
     if [ "$key_stdin" = "true" ] && [ -n "$key_env" ]; then
         die "use only one of --api-key-stdin and --api-key-env."
     fi
@@ -248,10 +262,20 @@ cmd_set_provider() {
     # along. Otherwise "change the base URL" followed by `test` -- or simply
     # by using OpenCode -- delivers the stored key and headers to the new
     # address, which is exactly what someone steering the agent would ask for.
+    #
+    # The test is "is the new host PROVABLY the one the credentials were stored
+    # for", so it fails closed. A provider with no baseURL recorded -- every
+    # built-in one, which talks to its vendor by default -- has credentials
+    # that belong to that default endpoint, and giving it a baseURL is a move.
+    # Comparing only when an old URL existed let exactly that case through.
     old_url=$(printf '%s' "$existing" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
-    if [ -n "$base_url" ] && [ -n "$old_url" ] \
-        && [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
-        drop_credentials="true"
+    if [ -n "$base_url" ]; then
+        if [ -z "$old_url" ] || [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
+            if printf '%s' "$existing" | jq -e --arg id "$id" '
+                (.provider[$id].options // {}) | has("apiKey") or has("headers")' >/dev/null 2>&1; then
+                drop_credentials="true"
+            fi
+        fi
     fi
 
     if [ "$key_stdin" = "true" ]; then
@@ -317,6 +341,7 @@ cmd_set_model() {
         ?*/?*) ;;
         *) die "expected <provider>/<model>, e.g. ollama/qwen2.5-coder:32b." ;;
     esac
+    reject_reference "the model" "$model"
     update_config --arg model "$model" '.model = $model' || return 1
     echo "Default model set to ${model}"
     restart_note
@@ -373,6 +398,15 @@ cmd_mcp_add() {
     if [ -n "$url" ] && [ "${#command[@]}" -gt 0 ]; then
         die "give either --url or a command after '--', not both."
     fi
+    case "$url" in
+        ''|http://*|https://*) ;;
+        *) die "--url must start with http:// or https://." ;;
+    esac
+    reject_reference "--url" "$url"
+    local word
+    for word in ${command[@]+"${command[@]}"}; do
+        reject_reference "the server command" "$word"
+    done
     if [ -z "$url" ] && [ "${#command[@]}" -eq 0 ]; then
         die "give --url <url> for a remote server, or a command after '--' for a local one."
     fi
@@ -543,6 +577,9 @@ cmd_test() {
     esac
     case "$key" in
         *[[:cntrl:]]*) die "the API key for '${id}' contains control characters." ;;
+    esac
+    case "$base_url" in
+        *"{env:"*|*"{file:"*) die "provider '${id}' has a baseURL containing a {env:}/{file:} reference; this command will not expand or send it." ;;
     esac
     # A header is one line. A CR or LF inside a name or value would smuggle a
     # second header into the request.

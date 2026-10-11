@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.5.1-wdn.21
+
+Security fixes for `opencode-config`, the command Claude uses to configure
+OpenCode. Update if you use OpenCode with an API key.
+
+- **A provider's key could still follow it to a new address.** 2.5.1-wdn.20
+  dropped a stored key when a provider's base URL moved to a different host,
+  but only if a base URL had been set before. A built-in provider such as
+  OpenRouter has a key and no base URL, so giving it one kept the key. The key
+  and headers are now dropped whenever the new address is not provably the
+  one they were stored for.
+- **`{env:...}` and `{file:...}` are refused in every value, not just
+  headers.** OpenCode expands them wherever they appear, so a base URL, model
+  name, MCP URL or MCP command containing one could read a secret, including
+  the add-on's Home Assistant token, and send it out. Only the API key options
+  can create a reference now.
+- MCP server URLs added with `opencode-config mcp add --url` must be http(s).
+
 ## 2.5.1-wdn.20
 
 OpenCode, as a second agent.
