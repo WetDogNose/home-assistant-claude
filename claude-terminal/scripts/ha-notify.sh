@@ -29,9 +29,16 @@ notify_id="${3:-claude_terminal}"
 # have the admin's browser deliver it. Images are turned into plain links,
 # which need a click; links themselves stay, because the sign-in notification
 # is one.
+#
+# Two things that look like simplifications and are bypasses:
+#   "!+" not "!"   removing one "!" from "!![" leaves "![".
+#   every "<"      not a list of tags. <img> is one of many elements that
+#                  fetch on render (video poster, audio, source, iframe, svg
+#                  image...), and a list is only as good as its last entry.
+#                  Nothing the add-on sends relies on HTML.
 payload=$(jq -nc \
     --arg t "$title" --arg m "$message" --arg i "$notify_id" \
-    'def inert: gsub("!\\["; "[") | gsub("<(?<t>[Ii][Mm][Gg])"; "&lt;\(.t)");
+    'def inert: gsub("!+\\["; "[") | gsub("<"; "&lt;");
      {title: ($t | inert), message: ($m | inert), notification_id: $i}') || exit 0
 
 curl -fsS -m 10 -o /dev/null \

