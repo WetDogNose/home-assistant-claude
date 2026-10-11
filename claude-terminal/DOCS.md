@@ -398,7 +398,9 @@ Two things keep that down:
   Home Assistant tools: a search, a few that are always useful, and three that
   run whatever the search finds — one for reading, one for changing, one for
   deleting. Everything Home Assistant could do before, it can still do.
-  Reading does not ask for approval; changing and deleting always do. Turn the
+  Reading does not ask for approval; changing and deleting always do. (If you
+  set `ha_mcp_version` to a release newer than this add-on knows, reading
+  asks as well.) Turn the
   option off if your model struggles to find the tool it needs, and each tool
   goes back to being listed and approved by name.
 - **The `review` agent.** An agent with no Home Assistant tools at all, for

@@ -208,32 +208,58 @@ translate_claude_mcp() {
 # fetches and every MCP tool -- including the Home Assistant ones, which can
 # switch devices and restart Core -- running unprompted. Order matters:
 # OpenCode applies the LAST matching rule, so the catch-all comes first.
-#
-# The Home Assistant entries are for ha-mcp's tool-search mode, where nearly
-# every call goes through a proxy instead of a tool of its own. ha-mcp admits
-# to ha_call_read_tool only tools annotated read-only, plus the enumerated
-# read actions of a `manage` tool, and fails closed on anything else (checked
-# in transforms/categorized_search.py, 8.6.0) -- so it is allowed, along with
-# the search tool and the pinned tools that only read. The write and delete
-# proxies reach every other tool ha-mcp has, and are spelled out as "ask" so
-# that nobody widens them with a wildcard: `home-assistant_ha_call_*` would.
-# With tool search off these names match nothing and every Home Assistant
-# tool falls to the catch-all. **When bumping ha-mcp, re-check what the read
-# proxy admits.**
 POLICY_FILTER='
     {"*": "ask",
      read: "allow", glob: "allow", grep: "allow", list: "allow", lsp: "allow",
      todoread: "allow", todowrite: "allow", skill: "allow", task: "allow",
      question: "allow",
-     "home-assistant_ha_search_tools": "allow",
+     edit: "ask", bash: "ask", external_directory: "ask"}'
+
+# Added to the policy ONLY when the add-on itself registered ha-mcp, in
+# tool-search mode, at a version whose read proxy has been read (see
+# ha_read_allowed). In that mode nearly every call goes through a proxy
+# instead of a tool of its own. ha-mcp admits to ha_call_read_tool only tools
+# annotated read-only (8.x: plus the enumerated read actions of a `manage`
+# tool) and refuses anything else -- transforms/categorized_search.py, read at
+# 7.11.0 and 8.6.0 -- so it is allowed, with the search tool and the pinned
+# tools that only read. That is the whole of the trust placed in ha-mcp here:
+# its read/write classification. The write and delete proxies reach every
+# other tool it has, and are spelled out as "ask" so that nobody widens them
+# with a wildcard: `home-assistant_ha_call_*` would.
+#
+# Conditional, not unconditional, because each condition is a way the names
+# could mean something else: with the option off the pinned names are
+# ordinary tools that asked before; with the add-on's server off,
+# `home-assistant` could be a server the user defined; and a ha-mcp release
+# nobody has read may classify differently.
+HA_READ_POLICY='
+    {"home-assistant_ha_search_tools": "allow",
      "home-assistant_ha_call_read_tool": "allow",
      "home-assistant_ha_search": "allow",
      "home-assistant_ha_get_overview": "allow",
      "home-assistant_ha_config_get_automation": "allow",
      "home-assistant_ha_get_skill_guide": "allow",
      "home-assistant_ha_call_write_tool": "ask",
-     "home-assistant_ha_call_delete_tool": "ask",
-     edit: "ask", bash: "ask", external_directory: "ask"}'
+     "home-assistant_ha_call_delete_tool": "ask"}'
+
+# FAIL CLOSED: every input must be an explicit match. **Adding a major
+# version here means reading that release's read proxy first.**
+ha_read_allowed() {
+    [ "${OC_HA_MCP:-}" = "true" ] && [ "${OC_HA_TOOL_SEARCH:-}" = "true" ] || return 1
+    case "${OC_HA_MCP_VERSION:-}" in
+        7.*|8.*) return 0 ;;
+    esac
+    return 1
+}
+
+# The policy for the current inputs, as compact JSON.
+build_policy() {
+    if ha_read_allowed; then
+        jq -nc "(${POLICY_FILTER}) + (${HA_READ_POLICY})"
+    else
+        jq -nc "$POLICY_FILTER"
+    fi
+}
 
 # The `review` agent: `build` without the Home Assistant tools. Their
 # definitions are most of what OpenCode sends on every request, and reviewing
@@ -267,7 +293,8 @@ BUILTIN_LSP='["astro","bash","clangd","csharp","clojure-lsp","dart","deno",
     "terraform","tinymist","typescript","vue","zls"]'
 
 build_enforced() {
-    local skip="$1" lsp="${2:-false}"
+    local skip="$1" lsp="${2:-false}" policy
+    policy=$(build_policy) && [ -n "$policy" ] || return 1
     # Fail SAFE: only an explicit "true" removes the prompts. An option that
     # could not be read arrives here as anything else and keeps them.
     #
@@ -287,9 +314,9 @@ build_enforced() {
     # review is written even without prompts: keeping tool definitions out of
     # the request is not a permission setting.
     jq -n --arg skip "$skip" --arg lsp "$lsp" --argjson builtin "$BUILTIN_LSP" \
+        --argjson policy "$policy" \
         --argjson review_deny "$REVIEW_DENY" --arg review_description "$REVIEW_DESCRIPTION" "
-        (${POLICY_FILTER}) as \$policy
-        | {description: \$review_description, mode: \"primary\"} as \$review
+        {description: \$review_description, mode: \"primary\"} as \$review
         | {\"\$schema\": \"https://opencode.ai/config.json\", autoupdate: false,
            formatter: false,
            lsp: (if \$lsp == \"true\"
@@ -486,7 +513,12 @@ case "${1:-}" in
         write_layers
         ;;
     policy)
-        jq -nc "$POLICY_FILTER"
+        # From the RECORDED options, never the caller's environment, so this
+        # is the same object the enforced file holds. No record, or one that
+        # does not say so explicitly, means no Home Assistant allowances.
+        OC_HA_MCP="" OC_HA_TOOL_SEARCH="" OC_HA_MCP_VERSION=""
+        load_recorded || true
+        build_policy
         ;;
     -h|--help|help)
         sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'

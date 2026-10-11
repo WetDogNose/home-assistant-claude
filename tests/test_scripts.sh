@@ -1299,6 +1299,26 @@ oc_assert "the review agent still has no Home Assistant tools without prompts" \
 # read-only (and the enumerated read actions of a `manage` tool), so that one
 # may run unprompted; the write and delete proxies reach everything else.
 run_layers write
+# Each of these is a way the allowed names could mean something else: with the
+# option off they are ordinary tools that used to ask, without the add-on's
+# server `home-assistant` may be one the user defined, and a ha-mcp release
+# nobody has read may sort its tools differently.
+oc_assert "without the add-on's ha-mcp nothing Home Assistant is allowed" \
+    jq -e '[.permission | keys[] | select(startswith("home-assistant"))] == []' "$OPENCODE_ENFORCED_FILE"
+OC_HA_MCP=true OC_HA_MCP_VERSION=8.6.0 OC_HA_TOOL_SEARCH=false run_layers write
+oc_assert "with tool search off nothing Home Assistant is allowed" \
+    jq -e '[.permission | keys[] | select(startswith("home-assistant"))] == []' "$OPENCODE_ENFORCED_FILE"
+OC_HA_MCP=true OC_HA_MCP_VERSION=9.0.0 run_layers write
+oc_assert "an unreviewed ha-mcp major version gets no allowances" \
+    jq -e '[.permission | keys[] | select(startswith("home-assistant"))] == []' "$OPENCODE_ENFORCED_FILE"
+oc_assert "the review agent still drops Home Assistant tools then" \
+    jq -e '.agent.review.permission | (to_entries | last) == {key: "home-assistant_*", value: "deny"}' "$OPENCODE_ENFORCED_FILE"
+rm -f "$OPENCODE_RUN_DIR/opencode-layers.env"
+oc_assert "with no recorded options the environment policy has no allowances" \
+    sh -c "OC_HA_MCP=true OC_HA_TOOL_SEARCH=true OC_HA_MCP_VERSION=8.6.0 '$OC_LAYERS' policy | jq -e '[keys[] | select(startswith(\"home-assistant\"))] == []'"
+OC_HA_MCP=true OC_HA_MCP_VERSION=8.6.0 run_layers write
+oc_assert "the environment policy matches the enforced file with allowances too" \
+    test "$("$OC_LAYERS" policy)" = "$(jq -c '.permission' "$OPENCODE_ENFORCED_FILE")"
 oc_assert "Home Assistant tool search and the read proxy do not ask" \
     jq -e '.permission["home-assistant_ha_search_tools"] == "allow" and .permission["home-assistant_ha_call_read_tool"] == "allow"' "$OPENCODE_ENFORCED_FILE"
 oc_assert "the Home Assistant write and delete proxies ask" \
