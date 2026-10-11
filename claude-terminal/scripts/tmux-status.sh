@@ -54,6 +54,18 @@ ha_status() {
 # --- Build output ---
 auth=$(auth_status)
 ha=$(ha_status)
-datetime=$(date '+%a %m-%d %H:%M')
 
-echo "${auth} #[fg=colour245]| ${ha} #[fg=colour245]| #[fg=colour252]${datetime}"
+# tmux.conf passes the client width. On a narrow client (a phone) the date is
+# dropped: the bar has to leave room for the window list, which is where the
+# "Ctrl-b 2 opencode" hint lives, and a phone shows the time already.
+width="${1:-}"
+case "$width" in
+    ''|*[!0-9]*) width=999 ;;
+esac
+
+if [ "$width" -lt 76 ]; then
+    echo "${auth} #[fg=colour245]| ${ha} "
+else
+    datetime=$(date '+%a %m-%d %H:%M')
+    echo "${auth} #[fg=colour245]| ${ha} #[fg=colour245]| #[fg=colour252]${datetime}"
+fi

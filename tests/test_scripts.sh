@@ -1749,6 +1749,46 @@ else
     echo "  [SKIP] tmux not available; terminal-session not exercised"
 fi
 
+# --- status bar --------------------------------------------------------------
+
+# tmux's default entry for the other window ("2:opencode-") does not tell
+# anyone who has not used tmux that it can be switched to, or how.
+OC_TMUX_CONF="$SCRIPT_DIR/tmux.conf"
+oc_assert "the inactive window shows the keys that reach it" \
+    grep -q '^setw -g window-status-format " Ctrl-b #I #W "$' "$OC_TMUX_CONF"
+oc_assert "the active window is shown by name only" \
+    grep -q '^setw -g window-status-current-format " #W "$' "$OC_TMUX_CONF"
+# On a 50-column phone the full bar left no room for the window list at all, so
+# the hint vanished exactly where it is needed. Title and date give way.
+# Numerically: tmux's bare #{<:a,b} compares strings, and "110" < "70".
+oc_assert "the title is dropped on a narrow client, compared as a number" \
+    grep -q '^set -g status-left "#{?#{e|<:#{client_width},76},,' "$OC_TMUX_CONF"
+# The bar and the script each decide "narrow" for themselves.
+oc_assert "tmux.conf and tmux-status.sh agree on what narrow means" \
+    grep -q 'if \[ "\$width" -lt 76 \]; then' "$SCRIPT_DIR/tmux-status.sh"
+oc_refute "no width test in tmux.conf uses the string comparison" \
+    grep -q '#{<:#{client_width}' "$OC_TMUX_CONF"
+oc_assert "the status script drops the date on a narrow client" \
+    sh -c "! SUPERVISOR_TOKEN= '$SCRIPT_DIR/tmux-status.sh' 50 | grep -q '[0-9][0-9]:[0-9][0-9]'"
+oc_assert "and keeps it on a wide one" \
+    sh -c "SUPERVISOR_TOKEN= '$SCRIPT_DIR/tmux-status.sh' 120 | grep -q '[0-9][0-9]:[0-9][0-9]'"
+oc_assert "and when called with no width at all" \
+    sh -c "SUPERVISOR_TOKEN= '$SCRIPT_DIR/tmux-status.sh' | grep -q '[0-9][0-9]:[0-9][0-9]'"
+if command -v tmux >/dev/null 2>&1; then
+    OC_BAR="$OC_DIR/bar"
+    mkdir -p "$OC_BAR/home"
+    bar_tmux() { HOME="$OC_BAR/home" TMUX_TMPDIR="$OC_BAR" TMUX="" tmux -f "$OC_TMUX_CONF" "$@"; }
+    bar_tmux new-session -d -s bar -n claude 'sleep 300' 2>/dev/null
+    bar_tmux new-window -d -t bar: -n opencode 'sleep 300' 2>/dev/null
+    oc_assert "rendered: from Claude, the bar reads 'Ctrl-b 2 opencode'" \
+        test "$(bar_tmux display-message -p -t bar:2 '#{T:window-status-format}')" = " Ctrl-b 2 opencode "
+    oc_assert "rendered: the window you are in is just its name" \
+        test "$(bar_tmux display-message -p -t bar:1 '#{T:window-status-current-format}')" = " claude "
+    bar_tmux kill-server >/dev/null 2>&1 || true
+else
+    echo "  [SKIP] tmux not available; status bar not rendered"
+fi
+
 # --- wiring ------------------------------------------------------------------
 
 oc_assert "run.sh main() sets OpenCode up at boot" grep -q '^    setup_opencode$' "$RUN_SH"

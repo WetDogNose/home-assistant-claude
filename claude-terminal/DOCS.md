@@ -302,7 +302,8 @@ it can use a local model on your own hardware, an aggregator, a company
 gateway, or any other API endpoint.
 
 It lives in **window 2** of the terminal. Press `Ctrl-b` then `2` to switch to
-it and `Ctrl-b` then `1` to come back; on a phone, use the key bar's Ctrl key,
+it and `Ctrl-b` then `1` to come back. The bar at the bottom of the terminal
+shows the keys for whichever window you are not in; on a phone, use the key bar's Ctrl key,
 or `Ctrl-b h` for a menu. OpenCode starts when you press Enter in its window,
 so it uses no memory until you want it.
 
