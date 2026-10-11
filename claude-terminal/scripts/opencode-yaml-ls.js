@@ -27,6 +27,10 @@ const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+// Pinned: this is fetched at runtime and run as root, so it must not track
+// whatever was published most recently. Bump deliberately.
+const YAML_LS_VERSION = "1.25.0";
+
 const cacheHome = process.env.XDG_CACHE_HOME || path.join(process.env.HOME || "/root", ".cache");
 const prefix = path.join(cacheHome, "opencode", "packages", "yaml-language-server");
 const server = path.join(prefix, "node_modules", "yaml-language-server", "bin", "yaml-language-server");
@@ -36,7 +40,7 @@ if (!fs.existsSync(server)) {
     fs.mkdirSync(prefix, { recursive: true });
     const install = spawnSync(
         "npm",
-        ["install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", "yaml-language-server"],
+        ["install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", `yaml-language-server@${YAML_LS_VERSION}`],
         { stdio: ["ignore", "ignore", "inherit"], timeout: 180000 }
     );
     if (install.status !== 0 || !fs.existsSync(server)) {

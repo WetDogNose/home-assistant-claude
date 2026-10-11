@@ -44,7 +44,7 @@ Your credentials are stored under `/data` and persist across restarts and app up
 | `enable_opencode` | `true` | Add [OpenCode](https://opencode.ai/) as a second agent in window 2 of the terminal. See [OpenCode](#opencode). |
 | `opencode_auto_update` | `true` | Refresh OpenCode in the background on every start. A new build only replaces the current one after it has been seen to run. |
 | `opencode_version` | `""` | Empty tracks the newest release; an exact `X.Y.Z` pins it. |
-| `opencode_lsp` | `true` | Language servers inside OpenCode: YAML that understands `!secret` and `!include`, shell and Python. Each is an extra process while OpenCode runs. |
+| `opencode_lsp` | `true` | YAML checking inside OpenCode, set up to understand `!secret` and `!include`. An extra process while OpenCode runs. |
 | `enable_opencode_mcp` | `true` | Give Claude tools for handing work to OpenCode. Uses the third-party `opencode-mcp` package; see [the caveats](#letting-claude-hand-work-to-opencode). |
 | `opencode_mcp_version` | `"3.0.0"` | Exact version of that package to install. Never updated automatically. |
 | `ha_smart_context` | `true` | Write a summary of your system to Claude's user memory (`~/.claude/CLAUDE.md`) so it knows your setup without being told. |
@@ -335,6 +335,9 @@ A local address has to be reachable from the add-on's container. `localhost`
 there is the add-on itself, not your PC or the Home Assistant host, so use the
 machine's LAN address.
 
+If you change a provider's base URL to a different host, its stored key and
+headers are dropped rather than sent to the new address; supply them again.
+
 `opencode-config` covers base URL, key, headers and models. For anything else
 OpenCode supports — Azure resource names, Bedrock regions, per-model context
 limits, timeouts — edit `/data/.config/opencode/opencode.json` directly (ask
@@ -436,13 +439,19 @@ They behave like the Claude entities above, including disappearing briefly
 when Home Assistant restarts. They cover tasks Claude delegates as well as
 your own use of window 2.
 
-### Language servers
+### YAML checking
 
-With `opencode_lsp` on, OpenCode checks files as it edits them. YAML is set up
-for Home Assistant, so `!secret`, `!include` and the other tags are understood
-instead of being reported as errors. The servers are downloaded the first time
-a matching file is opened, which needs internet access once, and are kept out
-of backups.
+With `opencode_lsp` on, OpenCode checks YAML as it edits it, set up for Home
+Assistant so `!secret`, `!include` and the other tags are understood instead
+of being reported as errors. The checker is downloaded the first time a YAML
+file is opened, which needs internet access once, and is kept out of backups.
+
+OpenCode's other built-in language servers and code formatters (TypeScript,
+ESLint, Python and the rest) are switched off, and cannot be switched back on
+from a config file. Several of them run code they find in the folder being
+edited, and OpenCode starts them as soon as it reads a matching file, without
+asking. In `/config` that would let a file from a repository or a custom card
+run commands on your system.
 
 ## Home Assistant MCP Integration
 

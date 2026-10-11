@@ -32,8 +32,10 @@ OpenCode, as a second agent.
 - **New entities**: `binary_sensor.opencode_busy`, `sensor.opencode_status`,
   `sensor.opencode_last_run`, `sensor.opencode_last_result` and
   `sensor.opencode_version`, controlled by the existing `enable_ha_entities`.
-- **Language servers in OpenCode** (`opencode_lsp`), with YAML set up so
-  `!secret` and `!include` are understood rather than flagged.
+- **YAML checking in OpenCode** (`opencode_lsp`), set up so `!secret` and
+  `!include` are understood rather than flagged. OpenCode's other built-in
+  language servers and formatters are switched off, because several run code
+  from the folder being edited without asking.
 - `claude-doctor` has an OpenCode section.
 - The image grows by the size of the OpenCode binary, about 190 MB. The
   persistent copy, its language servers and the bridge are excluded from

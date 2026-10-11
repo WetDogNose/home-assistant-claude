@@ -73,15 +73,38 @@ warn_if_unenforced() {
         echo ""
         return 0
     fi
-    echo -e "  ${YELLOW}The add-on's permission settings for OpenCode are missing.${NC}"
-    echo -e "  ${DIM}OpenCode will edit files and run commands without asking.${NC}"
-    echo -e "  ${DIM}Restart the add-on and check its log if this is not what you want.${NC}"
+    # Neither copy of the policy is present. Do not start allow-all and merely
+    # say so: apply the policy here. If the user had asked for no prompts
+    # (dangerously_skip_permissions) the enforced file would still exist, so
+    # reaching this point always means something failed, and failing toward
+    # "ask" is the safe direction.
+    local policy=""
+    command -v opencode-layers >/dev/null 2>&1 && policy=$(opencode-layers policy 2>/dev/null)
+    if [ -n "$policy" ]; then
+        export OPENCODE_PERMISSION="$policy"
+        echo -e "  ${YELLOW}The add-on's permission settings for OpenCode were missing.${NC}"
+        echo -e "  ${DIM}They have been applied for this session. Restart the add-on and check its log.${NC}"
+        echo ""
+        return 0
+    fi
+    echo -e "  ${YELLOW}OpenCode's permission settings could not be applied, so it will not be started.${NC}"
+    echo -e "  ${DIM}Without them it would edit files and run commands without asking.${NC}"
+    echo -e "  ${DIM}Restart the add-on and check its log.${NC}"
     echo ""
+    return 1
 }
 
 if [ "$WAIT" = "true" ]; then
     banner
-    warn_if_unenforced
+fi
+
+# On every start, not only the first: this is the last point at which a
+# missing policy can be caught before OpenCode has tools.
+if ! warn_if_unenforced; then
+    exec /usr/local/bin/welcome --shell
+fi
+
+if [ "$WAIT" = "true" ]; then
     echo -e "  Press ${TERRACOTTA}Enter${NC} to start OpenCode."
     read -r _
 fi

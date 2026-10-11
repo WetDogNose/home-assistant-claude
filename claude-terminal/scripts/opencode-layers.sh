@@ -154,6 +154,23 @@ translate_claude_mcp() {
         (names("enabledMcpjsonServers")) as $enabled
         | (names("disabledMcpjsonServers")) as $disabled
         | ($a1.enableAllProjectMcpServers == true or $a2.enableAllProjectMcpServers == true) as $all_enabled
+        # A server NAME is printed to the terminal, the add-on log and -- through
+        # `opencode-config mcp sync` -- into the context of the agent that ran
+        # it. In /config/.mcp.json it is attacker-chosen text that needs no
+        # approval to be reported as "not approved", so anything that is not a
+        # plain identifier is dropped and only counted.
+        | def plain: test("^[A-Za-z0-9._-]{1,64}$");
+        ([$user, $local, $project_all | keys[] | select(plain | not)] | length) as $invalid
+        | ($user | with_entries(select(.key | plain))) as $user
+        | ($local | with_entries(select(.key | plain))) as $local
+        | ($project_all | with_entries(select(.key | plain))) as $project_all
+        # Claude Code does not expand {file:...} or {env:...}; OpenCode does. A
+        # project entry carrying one literally is inert where the user approved
+        # it and live here -- e.g. a URL with {file:<a secrets path>} in its
+        # query string. Refused rather than shared.
+        | def literal_ref: [.. | strings | select(test("\\{(file|env):"))] | length > 0;
+        ([$project_all | to_entries[] | select(.value | literal_ref) | .key]) as $refused
+        | ($project_all | with_entries(select(.value | literal_ref | not))) as $project_all
         | ($project_all | with_entries(select(
               .key as $k
               | ($disabled | index($k)) == null
@@ -163,7 +180,7 @@ translate_claude_mcp() {
         # of ANY scope. One the user turned off there must not come back on here.
         | (names("disabledMcpServers")) as $off
         | ($user + $local + $project | with_entries(select(.key as $k | ($off | index($k)) == null))) as $all
-        | reduce ($all | to_entries[]) as $e ({servers: {}, skipped: [], unapproved: $unapproved};
+        | reduce ($all | to_entries[]) as $e ({servers: {}, skipped: $refused, unapproved: $unapproved, invalid: $invalid};
             if $e.key == "opencode" or $e.key == "home-assistant" then .
             else ($e.value | if type == "object" then translate else null end) as $t
                 | if $t == null then .skipped += [$e.key]
@@ -196,8 +213,30 @@ POLICY_FILTER='
      question: "allow",
      edit: "ask", bash: "ask", external_directory: "ask"}'
 
+# Every language server OpenCode ships, except yaml-ls (which the defaults
+# layer replaces with the add-on's own wrapper).
+#
+# These are switched off in the ENFORCED layer because several of them load
+# code from the project directory: the TypeScript server runs
+# node_modules/typescript/lib/tsserver.js from the project, ESLint and oxlint
+# run the project's own copies, and so on. The project directory is /config,
+# and OpenCode starts a server the moment it READS a matching file -- which the
+# permission policy allows without asking. A planted
+# /config/node_modules/typescript therefore ran as root with no prompt
+# (reproduced against the built image). bash and pyright are off too: they are
+# resolved the same way, and "probably fine" is not the standard here.
+#
+# This is a denylist because OpenCode offers no "custom servers only" switch.
+# A server added by a future OpenCode release will NOT be on it -- when bumping
+# OpenCode, compare this list with its documented built-ins.
+BUILTIN_LSP='["astro","bash","clangd","csharp","clojure-lsp","dart","deno",
+    "elixir-ls","eslint","fsharp","gleam","gopls","hls","jdtls","julials",
+    "kotlin-ls","lua-ls","nixd","ocaml-lsp","oxlint","php intelephense",
+    "prisma","pyright","razor","ruby-lsp","rust","sourcekit-lsp","svelte",
+    "terraform","tinymist","typescript","vue","zls"]'
+
 build_enforced() {
-    local skip="$1"
+    local skip="$1" lsp="${2:-false}"
     # Fail SAFE: only an explicit "true" removes the prompts. An option that
     # could not be read arrives here as anything else and keeps them.
     #
@@ -206,9 +245,20 @@ build_enforced() {
     # matters twice over: a `build` redefined in the user layer would otherwise
     # shed the policy, and `explore` -- which any agent may spawn, since `task`
     # is allowed -- ships with `bash: allow` of its own.
-    jq -n --arg skip "$skip" "
+    #
+    # formatter: false for the same reason as the LSP list -- formatters such
+    # as prettier are resolved from the project and run after an edit.
+    #
+    # lsp: with the option off this must be the literal `false`. An object,
+    # even one that only disables servers, turns the built-ins it does not
+    # name back ON.
+    jq -n --arg skip "$skip" --arg lsp "$lsp" --argjson builtin "$BUILTIN_LSP" "
         (${POLICY_FILTER}) as \$policy
-        | {\"\$schema\": \"https://opencode.ai/config.json\", autoupdate: false}
+        | {\"\$schema\": \"https://opencode.ai/config.json\", autoupdate: false,
+           formatter: false,
+           lsp: (if \$lsp == \"true\"
+                 then (\$builtin | map({key: ., value: {disabled: true}}) | from_entries)
+                 else false end)}
         + (if \$skip == \"true\" then {}
            else {permission: \$policy,
                  agent: {build: {permission: \$policy},
@@ -320,13 +370,14 @@ normalise_inputs() {
 # The caller treats them differently -- a missing defaults layer costs
 # features, a missing enforced layer costs the confirmation prompts.
 write_layers() {
-    local rc=0 translated shared='{}' skipped='[]' unapproved='[]' enforced defaults
+    local rc=0 translated shared='{}' skipped='[]' unapproved='[]' invalid=0 enforced defaults
 
     if [ "$OC_SHARE_CLAUDE_MCP" = "true" ]; then
         if translated=$(translate_claude_mcp) && [ -n "$translated" ]; then
             shared=$(printf '%s' "$translated" | jq -c '.servers')
             skipped=$(printf '%s' "$translated" | jq -c '.skipped')
             unapproved=$(printf '%s' "$translated" | jq -c '.unapproved')
+            invalid=$(printf '%s' "$translated" | jq -r '.invalid')
         else
             warn "could not read Claude Code's MCP servers; none are shared"
         fi
@@ -340,7 +391,11 @@ write_layers() {
         warn "not shared (in ${CLAUDE_PROJECT_MCP} but not approved in Claude Code): $(printf '%s' "$unapproved" | jq -r 'join(", ")')"
     fi
 
-    if enforced=$(build_enforced "$OC_SKIP_PERMISSIONS") \
+    if [ "$invalid" != "0" ]; then
+        warn "ignored ${invalid} MCP server(s) whose names are not plain identifiers"
+    fi
+
+    if enforced=$(build_enforced "$OC_SKIP_PERMISSIONS" "$OC_LSP") \
         && printf '%s\n' "$enforced" | write_atomic "$ENFORCED_FILE" 644; then
         :
     else
@@ -360,7 +415,8 @@ write_layers() {
 
     # Names only -- claude-doctor and `opencode-config mcp list` read this.
     jq -nc --argjson shared "$shared" --argjson skipped "$skipped" --argjson unapproved "$unapproved" \
-        '{shared: ($shared | keys), skipped: $skipped, unapproved: $unapproved}' \
+        --arg invalid "$invalid" \
+        '{shared: ($shared | keys), skipped: $skipped, unapproved: $unapproved, invalid: ($invalid | tonumber? // 0)}' \
         | write_atomic "$SHARED_REPORT" 644 || true
 
     return "$rc"

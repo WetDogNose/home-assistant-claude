@@ -72,9 +72,38 @@ die() { echo "Error: $*" >&2; exit 1; }
 
 valid_id() {
     case "$1" in
-        ''|*[!A-Za-z0-9._-]*) return 1 ;;
+        ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
     esac
     return 0
+}
+
+# Variables that hold this add-on's own credentials for Home Assistant. They
+# are never a model provider's API key, so naming one as a key source can only
+# be a mistake or an attempt to have it sent somewhere.
+reserved_env() {
+    case "$1" in
+        SUPERVISOR_TOKEN|HASSIO_TOKEN|HOMEASSISTANT_TOKEN|HA_TOKEN) return 0 ;;
+    esac
+    return 1
+}
+
+# OpenCode expands {env:NAME} and {file:PATH} wherever they appear in its
+# config. In a header or an MCP environment value that turns "store this text"
+# into "read this secret and send it" -- a header of {env:SUPERVISOR_TOKEN} on
+# a provider is the Home Assistant token delivered to that provider. API keys
+# have their own flags; nothing else needs a reference.
+reject_reference() {
+    case "$2" in
+        *"{env:"*|*"{file:"*)
+            die "$1 values may not contain {env:...} or {file:...} references."
+            ;;
+    esac
+}
+
+# scheme://host[:port] of a URL, for deciding whether an endpoint has moved.
+url_origin() {
+    local rest="${1#*://}"
+    printf '%s://%s' "${1%%://*}" "${rest%%/*}"
 }
 
 # Print the user layer, or the empty document when there is none yet.
@@ -182,6 +211,19 @@ cmd_set_provider() {
     case "$key_env" in
         *[!A-Za-z0-9_]*) die "--api-key-env takes a variable name." ;;
     esac
+    if reserved_env "$key_env"; then
+        die "${key_env} is this add-on's Home Assistant credential, not a provider API key."
+    fi
+    # OpenCode installs and imports whatever package is named here the next
+    # time it starts, without asking. The AI SDK's own scope covers every
+    # provider protocol; anything else is a hand edit the user makes knowingly.
+    case "$npm" in
+        ''|@ai-sdk/*) ;;
+        *) die "--npm accepts only @ai-sdk/* packages. To use another package, edit $(basename "$CONFIG_FILE") by hand." ;;
+    esac
+    case "$npm" in
+        *[!A-Za-z0-9@/._-]*) die "--npm has characters that are not valid in a package name." ;;
+    esac
 
     local header pair_json headers_json='{}' models_json='[]' api_key_ref=""
     for header in ${headers[@]+"${headers[@]}"}; do
@@ -189,6 +231,7 @@ cmd_set_provider() {
             ?*=*) ;;
             *) die "--header expects NAME=value, got '${header}'." ;;
         esac
+        reject_reference "--header" "${header#*=}"
         pair_json=$(jq -nc --arg k "${header%%=*}" --arg v "${header#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')
     done
@@ -198,7 +241,18 @@ cmd_set_provider() {
 
     # Validate that the file can be edited BEFORE reading a key from stdin, so
     # a refused edit does not leave an orphaned secrets file behind.
-    load_config >/dev/null || return 1
+    local existing old_url drop_credentials="false"
+    existing=$(load_config) || return 1
+
+    # Moving a provider to a different host must not carry its credentials
+    # along. Otherwise "change the base URL" followed by `test` -- or simply
+    # by using OpenCode -- delivers the stored key and headers to the new
+    # address, which is exactly what someone steering the agent would ask for.
+    old_url=$(printf '%s' "$existing" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
+    if [ -n "$base_url" ] && [ -n "$old_url" ] \
+        && [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
+        drop_credentials="true"
+    fi
 
     if [ "$key_stdin" = "true" ]; then
         local key secret_file
@@ -217,12 +271,13 @@ cmd_set_provider() {
 
     update_config \
         --arg id "$id" --arg base_url "$base_url" --arg npm "$npm" --arg name "$name" \
-        --arg builtin "$builtin" --arg api_key "$api_key_ref" \
+        --arg builtin "$builtin" --arg api_key "$api_key_ref" --arg drop "$drop_credentials" \
         --argjson headers "$headers_json" --argjson models "$models_json" '
         (if (.provider | type) == "object" then .provider else {} end) as $providers
         | ($providers | has($id)) as $exists
         | (if $exists and ($providers[$id] | type) == "object" then $providers[$id] else {} end) as $old
         | (if ($old.options | type) == "object" then $old.options else {} end) as $old_options
+        | (if $drop == "true" then ($old_options | del(.apiKey, .headers)) else $old_options end) as $old_options
         | (if ($old.models | type) == "object" then $old.models else {} end) as $old_models
         | .provider = ($providers + {($id): (
             $old
@@ -249,6 +304,10 @@ cmd_set_provider() {
 
     echo "Provider '${id}' saved to ${CONFIG_FILE}"
     [ -n "$api_key_ref" ] && echo "API key reference: ${api_key_ref}"
+    if [ "$drop_credentials" = "true" ]; then
+        echo "The endpoint moved to a different host, so the previous API key and headers were"
+        echo "NOT carried over. Supply them again for the new endpoint if it needs them."
+    fi
     restart_note
 }
 
@@ -281,7 +340,8 @@ cmd_mcp_list() {
     current=$(load_config) || return 1
     printf '%s' "$current" | jq -r '
         if (.mcp | type) == "object" then .mcp else {} end
-        | to_entries[] | "\(.key)\t\(.value.type // "?")\tuser"'
+        | to_entries[] | select(.key | test("^[A-Za-z0-9._-]{1,64}$"))
+        | "\(.key)\t\(.value.type | tostring | gsub("[^a-z]"; ""))\tuser"'
     if [ -s "$DEFAULTS_FILE" ]; then
         local shared='[]'
         [ -s "$SHARED_REPORT" ] && shared=$(jq -c '.shared' "$SHARED_REPORT" 2>/dev/null || echo '[]')
@@ -289,7 +349,7 @@ cmd_mcp_list() {
             if (.mcp | type) == "object" then .mcp else {} end
             | to_entries[]
             | .key as $name
-            | "\($name)\t\(.value.type // "?")\t\(if ($shared | index($name)) != null then "shared from Claude Code" else "add-on" end)"' \
+            | "\($name)\t\(.value.type | tostring | gsub("[^a-z]"; ""))\t\(if ($shared | index($name)) != null then "shared from Claude Code" else "add-on" end)"' \
             "$DEFAULTS_FILE" 2>/dev/null
     fi
 }
@@ -320,11 +380,13 @@ cmd_mcp_add() {
     local pair pair_json env_json='{}' headers_json='{}' command_json='[]'
     for pair in ${envs[@]+"${envs[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--env expects NAME=value, got '${pair}'." ;; esac
+        reject_reference "--env" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         env_json=$(jq -nc --argjson a "$env_json" --argjson b "$pair_json" '$a + $b')
     done
     for pair in ${headers[@]+"${headers[@]}"}; do
         case "$pair" in ?*=*) ;; *) die "--header expects NAME=value, got '${pair}'." ;; esac
+        reject_reference "--header" "${pair#*=}"
         pair_json=$(jq -nc --arg k "${pair%%=*}" --arg v "${pair#*=}" '{($k): $v}')
         headers_json=$(jq -nc --argjson a "$headers_json" --argjson b "$pair_json" '$a + $b')
     done
@@ -422,17 +484,34 @@ cmd_validate() {
 }
 
 # Resolve an apiKey value to the key itself, for `test` only. Never printed.
+#
+# Deliberately narrower than what OpenCode itself will expand. `test` sends the
+# result to whatever baseURL the config names, so it must not be a way to read
+# an arbitrary file or the add-on's own Home Assistant token and post it: a
+# {file:} reference is honoured only inside this command's secrets directory,
+# and reserved variables are refused. Returns 1 for a reference it will not
+# follow.
 resolve_secret() {
     local value="$1" path var
     case "$value" in
         "{file:"*"}")
-            path="${value#\{file:}"; path="${path%\}}"; path="${path/#\~/$HOME}"
+            path="${value#\{file:}"; path="${path%\}}"
+            case "$path" in
+                "${SECRETS_DIR}/"*) ;;
+                *) return 1 ;;
+            esac
+            valid_id "${path#"${SECRETS_DIR}/"}" || return 1
             [ -r "$path" ] && tr -d '\r\n' < "$path"
+            return 0
             ;;
         "{env:"*"}")
             var="${value#\{env:}"; var="${var%\}}"
-            case "$var" in *[!A-Za-z0-9_]*|'') ;; *) printf '%s' "${!var:-}" ;; esac
+            case "$var" in *[!A-Za-z0-9_]*|'') return 1 ;; esac
+            reserved_env "$var" && return 1
+            printf '%s' "${!var:-}"
+            return 0
             ;;
+        *"{file:"*|*"{env:"*) return 1 ;;
         *) printf '%s' "$value" ;;
     esac
 }
@@ -445,7 +524,9 @@ cmd_test() {
     base_url=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
     [ -n "$base_url" ] || die "provider '${id}' has no baseURL in ${CONFIG_FILE}."
     key_ref=$(printf '%s' "$current" | jq -r --arg id "$id" '.provider[$id].options.apiKey // empty')
-    key=$(resolve_secret "$key_ref")
+    if ! key=$(resolve_secret "$key_ref"); then
+        die "provider '${id}' takes its API key from a reference this command will not follow (only keys stored with --api-key-stdin, or a non-reserved --api-key-env). Nothing was sent."
+    fi
 
     # These values come from a file that may have been edited by hand, and
     # they are about to be handed to curl. Checked with `case`, which sees the
@@ -471,7 +552,8 @@ cmd_test() {
           else all(to_entries[];
                    (.key | test("^[A-Za-z0-9-]+$"))
                    and (.value | type == "string" or type == "number" or type == "boolean")
-                   and (.value | tostring | test("[\\x00-\\x1f\\x7f]") | not))
+                   and (.value | tostring | test("[\\x00-\\x1f\\x7f]") | not)
+                   and (.value | tostring | test("\\{(env|file):") | not))
           end' >/dev/null 2>&1; then
         die "provider '${id}' has a header name or value that cannot be sent safely."
     fi
@@ -504,9 +586,15 @@ cmd_test() {
                            elif (.models | type) == "array" then (.models | length)
                            else "?" end' "$body" 2>/dev/null || echo "?")
             echo "OK: ${base_url%/}/models answered ${status} (${count} models)"
-            jq -r 'if (.data | type) == "array" then .data[].id
-                   elif (.models | type) == "array" then .models[] | (.id // .name)
-                   else empty end' "$body" 2>/dev/null | head -20 | sed 's/^/  /'
+            # The ids are text chosen by the endpoint, shown on a terminal and
+            # very likely read by the agent that ran this. Printable characters
+            # only, bounded, so a reply cannot draw on the screen or pose as
+            # instructions spread over several lines.
+            jq -r '[if (.data | type) == "array" then .data[].id
+                    elif (.models | type) == "array" then .models[] | (.id // .name)
+                    else empty end
+                    | tostring | gsub("[^A-Za-z0-9 ._:/@+-]"; "") | .[0:100] | select(length > 0)]
+                   | .[0:20][]' "$body" 2>/dev/null | sed 's/^/  /'
             ;;
         000)
             echo "FAIL: could not connect to ${base_url%/}/models"

@@ -67,7 +67,18 @@ Where they disagree, this section is what shipped.
 - **A server disabled in Claude Code** (`disabledMcpServers`) is not shared.
 - **`opencode-config test`** passes headers to curl in a header file, not a
   curl config, and validates with whole-string matching.
-- **`opencode-yaml-ls`** installs the YAML server with `--ignore-scripts`.
+- **`opencode-yaml-ls`** installs the YAML server with `--ignore-scripts`, at
+  a pinned version.
+- **All built-in language servers and formatters are disabled** in the
+  enforced layer; only the wrapped YAML server runs. The TypeScript server
+  executed a planted `/config/node_modules/typescript` on a mere file read.
+  Section 7's "Shell and Python" bullet no longer applies.
+- **`opencode-config` hardening**: a host change drops stored credentials;
+  the add-on's Home Assistant tokens cannot be named as a key; `--header` and
+  `--env` reject `{env:}`/`{file:}`; `test` follows `{file:}` only inside
+  `secrets/`; `--npm` is limited to `@ai-sdk/*`; endpoint- and file-supplied
+  names are sanitised before printing.
+- **`opencode-launch` fails closed** when neither copy of the policy exists.
 
 ## 1. Binary
 

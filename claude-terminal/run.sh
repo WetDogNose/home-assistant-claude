@@ -739,13 +739,17 @@ setup_opencode() {
         opencode-layers write || rc=$?
 
     case "$rc" in
-        2|3)
-            bashio::log.error "Could not write OpenCode's enforced config layer."
-            bashio::log.error "OpenCode will edit files and run commands WITHOUT asking."
+        0) ;;
+        1) bashio::log.warning "Could not write OpenCode's defaults layer; OpenCode will have no Home Assistant tools, shared MCP servers or language servers" ;;
+        # Everything else -- 2 and 3, but also 126/127 when the script itself
+        # is missing or not runnable -- means the enforced layer cannot be
+        # assumed to exist. Say so loudly rather than only for the codes that
+        # were anticipated.
+        *)
+            bashio::log.error "Could not write OpenCode's enforced config layer (opencode-layers exited ${rc})."
+            bashio::log.error "Its permission policy and language-server restrictions are NOT in the config file."
+            bashio::log.error "opencode-launch will apply the policy itself or refuse to start OpenCode."
             ;;
-    esac
-    case "$rc" in
-        1|3) bashio::log.warning "Could not write OpenCode's defaults layer; OpenCode will have no Home Assistant tools, shared MCP servers or language servers" ;;
     esac
 
     if [ -s /run/claude-terminal/opencode-defaults.json ]; then

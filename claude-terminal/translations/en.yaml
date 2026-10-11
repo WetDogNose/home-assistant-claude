@@ -86,11 +86,11 @@ configuration:
       stops working.
 
   opencode_lsp:
-    name: Code checking in OpenCode
+    name: YAML checking in OpenCode
     description: >-
-      Lets OpenCode check YAML, shell scripts and Python as it edits them, with
-      Home Assistant's own YAML tags such as !secret understood. Uses extra
-      memory while OpenCode is running; turn it off on a small device.
+      Lets OpenCode check YAML as it edits it, with Home Assistant's own tags
+      such as !secret understood. Uses extra memory while OpenCode is running;
+      turn it off on a small device.
 
   enable_opencode_mcp:
     name: Let Claude hand work to OpenCode

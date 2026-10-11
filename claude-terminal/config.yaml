@@ -109,9 +109,11 @@ schema:
   # Empty tracks the newest release; an exact X.Y.Z pins it. Same escape hatch
   # as claude_version, for the same reason: the update happens at runtime.
   opencode_version: str?
-  # Language servers inside OpenCode (YAML with Home Assistant's tags, shell,
-  # Python). Each one is another long-lived process, which is the reason this
-  # is a switch: on a small Raspberry Pi that memory may be better spent.
+  # The YAML language server inside OpenCode, with Home Assistant's tags. It
+  # is another long-lived process, which is the reason this is a switch: on a
+  # small Raspberry Pi that memory may be better spent. Every OTHER built-in
+  # OpenCode language server is disabled regardless of this option, because
+  # several of them execute code found in the project directory (/config).
   opencode_lsp: bool?
   # Register OpenCode with Claude Code as an MCP server, so Claude can hand
   # work to it. The bridge is a THIRD-PARTY package (opencode-mcp), which is
