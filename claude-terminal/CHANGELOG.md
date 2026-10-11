@@ -16,6 +16,11 @@ OpenCode. Update if you use OpenCode with an API key.
   name, MCP URL or MCP command containing one could read a secret, including
   the add-on's Home Assistant token, and send it out. Only the API key options
   can create a reference now.
+- **A provider you signed in to inside OpenCode cannot be silently repointed.**
+  A key saved by OpenCode's own sign-in, or taken from the provider's
+  `<NAME>_API_KEY` environment variable, is not in the file `opencode-config`
+  edits, so it cannot be dropped. Changing that provider's address is now
+  refused unless you supply the key for the new endpoint in the same command.
 - MCP server URLs added with `opencode-config mcp add --url` must be http(s).
 
 ## 2.5.1-wdn.20

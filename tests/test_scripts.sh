@@ -1503,6 +1503,25 @@ oc_assert "a host differing only in case is the same host" jq -e '.provider.case
 oc_assert "a userinfo prefix does not make another host look the same" \
     jq -e '.provider.casey.options | has("headers") | not' "$OC_USER"
 
+# A key saved by OpenCode's own sign-in lives in auth.json, not in the config
+# this command edits, so it cannot be dropped -- and OpenCode would attach it
+# to requests for the new address. The move is refused instead.
+export OPENCODE_AUTH_FILE="$OC_DIR/auth.json"
+echo '{"groq": {"type": "api", "key": "sk-signed-in"}}' > "$OPENCODE_AUTH_FILE"
+cp "$OC_USER" "$OC_DIR/before-auth.json"
+oc_refute "a provider signed in through OpenCode cannot be repointed" \
+    "$OC_CONFIG" set-provider groq --builtin --base-url https://attacker.example.net/v1
+oc_assert "the refused move changed nothing" cmp -s "$OC_USER" "$OC_DIR/before-auth.json"
+oc_assert "it can be repointed when a key for the new endpoint is supplied" \
+    sh -c "printf 'sk-new' | '$OC_CONFIG' set-provider groq --builtin --base-url https://gw.example.com/v1 --api-key-stdin"
+cp "$OC_USER" "$OC_DIR/before-auth.json"
+oc_refute "a provider keyed by its environment variable cannot be repointed" \
+    env MY_LAB_API_KEY=sk-env "$OC_CONFIG" set-provider my-lab --base-url https://attacker.example.net/v1
+oc_assert "that refused move changed nothing either" cmp -s "$OC_USER" "$OC_DIR/before-auth.json"
+oc_assert "an unrelated provider is not affected by another's sign-in" \
+    "$OC_CONFIG" set-provider fresh --base-url https://fresh.example.com/v1
+unset OPENCODE_AUTH_FILE
+
 # OpenCode expands references in EVERY field, not only the ones meant for
 # secrets. Each value the command accepts is checked, one assertion per field.
 oc_refute "a base URL may not carry a reference" \

@@ -19,6 +19,10 @@ SECRETS_DIR="${CONFIG_DIR}/secrets"
 RUN_DIR="${OPENCODE_RUN_DIR:-/run/claude-terminal}"
 DEFAULTS_FILE="${OPENCODE_DEFAULTS_FILE:-${RUN_DIR}/opencode-defaults.json}"
 SHARED_REPORT="${OPENCODE_SHARED_REPORT:-${RUN_DIR}/opencode-mcp-shared.json}"
+# Where OpenCode keeps credentials entered through its own sign-in (/connect,
+# `opencode auth login`). Not this command's file, but it decides where those
+# credentials get sent, so the move guard has to know about it.
+AUTH_FILE="${OPENCODE_AUTH_FILE:-${XDG_DATA_HOME:-${HOME}/.local/share}/opencode/auth.json}"
 EMPTY_CONFIG='{"$schema":"https://opencode.ai/config.json"}'
 
 show_help() {
@@ -255,8 +259,9 @@ cmd_set_provider() {
 
     # Validate that the file can be edited BEFORE reading a key from stdin, so
     # a refused edit does not leave an orphaned secrets file behind.
-    local existing old_url drop_credentials="false"
+    local existing old_url drop_credentials="false" api_key_source=""
     existing=$(load_config) || return 1
+    if [ "$key_stdin" = "true" ] || [ -n "$key_env" ]; then api_key_source="given"; fi
 
     # Moving a provider to a different host must not carry its credentials
     # along. Otherwise "change the base URL" followed by `test` -- or simply
@@ -271,6 +276,27 @@ cmd_set_provider() {
     old_url=$(printf '%s' "$existing" | jq -r --arg id "$id" '.provider[$id].options.baseURL // empty')
     if [ -n "$base_url" ]; then
         if [ -z "$old_url" ] || [ "$(url_origin "$base_url")" != "$(url_origin "$old_url")" ]; then
+            # Credentials this command can drop are only the ones in its own
+            # file. OpenCode also attaches a key saved by its sign-in, or one
+            # from the provider's environment variable, to whatever baseURL the
+            # config names -- and those cannot be dropped from here. So the
+            # move is refused instead, unless a key for the new endpoint is
+            # supplied in the same call, which is what OpenCode will then use.
+            if [ -z "$api_key_source" ]; then
+                local external=""
+                if [ -s "$AUTH_FILE" ] && jq -e --arg id "$id" 'type == "object" and has($id)' "$AUTH_FILE" >/dev/null 2>&1; then
+                    external="a credential saved by OpenCode's own sign-in"
+                else
+                    local env_name
+                    env_name="$(printf '%s' "$id" | tr 'a-z' 'A-Z' | tr '.-' '__')_API_KEY"
+                    case "$env_name" in
+                        [A-Z_]*) [ -n "${!env_name:-}" ] && external="the environment variable ${env_name}" ;;
+                    esac
+                fi
+                if [ -n "$external" ]; then
+                    die "provider '${id}' has ${external}, which OpenCode would send to the new address. Supply the key for the new endpoint in the same command (--api-key-stdin), or remove the existing credential first (opencode auth logout). Nothing was changed."
+                fi
+            fi
             if printf '%s' "$existing" | jq -e --arg id "$id" '
                 (.provider[$id].options // {}) | has("apiKey") or has("headers")' >/dev/null 2>&1; then
                 drop_credentials="true"
