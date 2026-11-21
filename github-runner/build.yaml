@@ -1,6 +1,6 @@
-# glibc base: the Actions runner is a .NET app with no musl build, so the
-# Alpine-based Home Assistant images cannot host it. trixie rather than
-# bookworm for its separate docker-cli package (bookworm only has the full
-# docker.io daemon package).
+# Ubuntu, the OS GitHub's hosted runners use: the Actions runner is a .NET app
+# with no musl build (so not the Alpine HA bases), and actions/setup-python
+# only has prebuilt Pythons for Ubuntu releases, so on Debian it fails with
+# "version not found for this operating system".
 build_from:
-  amd64: debian:trixie-slim
+  amd64: ubuntu:24.04
