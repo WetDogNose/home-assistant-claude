@@ -1,0 +1,74 @@
+#!/bin/bash
+# Wrapper ahead of /usr/bin/docker on PATH, for jobs that drive the HOST's
+# daemon through the socket:
+#  - bind-mount sources under /data are rewritten to the host's path for /data
+#    ($RUNNER_HOST_DATA), because the host daemon resolves them, not us;
+#  - `docker run`/`create` get a cleanup label, a low CPU weight and a memory
+#    cap, so a job container cannot starve Home Assistant and is removed by
+#    cleanup.sh if a job leaves it behind.
+# Limitation: arguments after the image are not told apart from options, so a
+# container command containing `-v /data/...` would be rewritten too.
+set -euo pipefail
+
+REAL=/usr/bin/docker
+HOST_DATA="${RUNNER_HOST_DATA:-}"
+
+host_path() {
+  local s=$1
+  if [ -n "$HOST_DATA" ] && { [ "$s" = /data ] || [[ $s == /data/* ]]; }; then
+    s="${HOST_DATA}${s#/data}"
+  fi
+  printf '%s' "$s"
+}
+
+# "-v SRC:DST[:opts]" -> source rewritten. Named volumes (no leading /) pass.
+volume_arg() { local v=$1; printf '%s:%s' "$(host_path "${v%%:*}")" "${v#*:}"; }
+
+# "--mount type=bind,source=SRC,..." -> source/src rewritten.
+mount_arg() {
+  local out="" part
+  local IFS=,
+  for part in $1; do
+    case $part in
+      source=* | src=*) part="${part%%=*}=$(host_path "${part#*=}")" ;;
+    esac
+    out+="${out:+,}$part"
+  done
+  printf '%s' "$out"
+}
+
+args=()
+sub=""
+expect=""
+for a in "$@"; do
+  if [ -n "$expect" ]; then
+    case $expect in
+      volume) args+=("$(volume_arg "$a")") ;;
+      mount) args+=("$(mount_arg "$a")") ;;
+    esac
+    expect=""
+    continue
+  fi
+  if [ -z "$sub" ] && [[ $a != -* ]]; then
+    sub=$a
+    args+=("$a")
+    if [ "$sub" = run ] || [ "$sub" = create ]; then
+      args+=(--label io.github.wetdognose.runner-job=1 --cpu-shares 256 --memory 2g)
+    fi
+    continue
+  fi
+  # Before the subcommand, -v is `docker -v` (print version), not a volume.
+  if [ -z "$sub" ]; then
+    args+=("$a")
+    continue
+  fi
+  case $a in
+    -v | --volume) args+=("$a"); expect=volume ;;
+    -v=* | --volume=*) args+=("${a%%=*}=$(volume_arg "${a#*=}")") ;;
+    --mount) args+=("$a"); expect=mount ;;
+    --mount=*) args+=("--mount=$(mount_arg "${a#*=}")") ;;
+    *) args+=("$a") ;;
+  esac
+done
+
+exec "$REAL" "${args[@]}"

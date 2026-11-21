@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Home Assistant add-on repository containing one add-on: **Claude Terminal** — Claude Code CLI in a browser terminal (ttyd + tmux), with [OpenCode](https://opencode.ai/) as a second agent in tmux window 2. The design goal is to stay thin: the add-on's job is running Claude Code reliably, not wrapping it in extra UI.
+A Home Assistant add-on repository. Its main add-on is **Claude Terminal** — Claude Code CLI in a browser terminal (ttyd + tmux), with [OpenCode](https://opencode.ai/) as a second agent in tmux window 2. The design goal is to stay thin: the add-on's job is running Claude Code reliably, not wrapping it in extra UI.
+
+The second add-on, **GitHub Actions Runner** (`github-runner/`), is a separate, locally built self-hosted runner for one private repository; its `DOCS.md` covers it. Nothing in `claude-terminal/`, its CI or its release process refers to it.
 
 Everything shippable lives in `claude-terminal/`. The repo root holds the HA add-on repository metadata (`repository.yaml`), the Nix dev shell, and docs.
 
