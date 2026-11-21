@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Home Assistant add-on repository. Its main add-on is **Claude Terminal** — Claude Code CLI in a browser terminal (ttyd + tmux), with [OpenCode](https://opencode.ai/) as a second agent in tmux window 2. The design goal is to stay thin: the add-on's job is running Claude Code reliably, not wrapping it in extra UI.
 
-The second add-on, **GitHub Actions Runner** (`github-runner/`), is a separate, locally built self-hosted runner for one private repository; its `DOCS.md` covers it. Nothing in `claude-terminal/`, its CI or its release process refers to it.
+The second add-on, **GitHub Actions Runner** (`github-runner/`), is a separate self-hosted runner (amd64 image from `publish-runner-image.yml`) for one private repository; its `DOCS.md` covers it. Nothing in `claude-terminal/`, its CI or its release process refers to it.
 
 Everything shippable lives in `claude-terminal/`. The repo root holds the HA add-on repository metadata (`repository.yaml`), the Nix dev shell, and docs.
 
@@ -160,6 +160,7 @@ Workflows in `.github/workflows/`:
 - **shellcheck.yml** (PRs touching `*.sh`) — severity `warning`, `-e SC1008 -e SC1091`
 - **security-scan.yml** — Trivy against the built image, on `claude-terminal/**` PRs, pushes to main and weekly. Reports HIGH/CRITICAL to the job summary, publishes **all** severities to the Security tab (the action ignores `severity:` for SARIF), and **fails** on a HIGH/CRITICAL that already has a fixed package — the one class a rebuild can act on. It is a gate, not a report: 132 alerts once accumulated across an entirely green history.
 - **publish-images.yml** — on `v*` tags (and manual dispatch), builds and pushes `ghcr.io/wetdognose/{arch}-addon-claude-terminal` via `home-assistant/builder` (pinned). The Supervisor pulls these; it does not build locally.
+- **publish-runner-image.yml** — when `github-runner/config.yaml` changes on main (a version bump) or by hand, builds and pushes `ghcr.io/wetdognose/amd64-addon-github-runner:<version>` and verifies it. GitHub-hosted on purpose: the runner cannot depend on the CI that moves onto it.
 - **release.yml** — on `v*` tags; **fails if the tag doesn't match `version:` in `config.yaml`**, and extracts release notes from the `## <version>` section of `claude-terminal/CHANGELOG.md`
 
 ## Fork layout

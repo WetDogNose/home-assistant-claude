@@ -1,5 +1,5 @@
 name: "GitHub Actions Runner"
-version: "0.1.0"
+version: "0.1.1"
 slug: github_runner
 description: >-
   Self-hosted GitHub Actions runner for one private repository: one job at a
@@ -7,8 +7,9 @@ description: >-
 url: https://github.com/WetDogNose/home-assistant-claude/tree/main/github-runner
 arch:
   - amd64
-# No image: key, so Supervisor builds this add-on locally from the Dockerfile.
-# There is nothing to publish and no registry to trust.
+# Prebuilt by .github/workflows/publish-runner-image.yml, so installing pulls
+# an image instead of building on the Home Assistant box.
+image: "ghcr.io/wetdognose/{arch}-addon-github-runner"
 startup: application
 boot: auto
 # Docker's tini runs as PID 1 and reaps whatever a job leaves orphaned. The

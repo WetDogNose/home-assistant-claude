@@ -1,0 +1,63 @@
+name: Publish Runner Image
+
+# Prebuilt image for the GitHub Actions Runner add-on (github-runner/), for
+# the same reasons as Publish Images: installs pull an image instead of
+# building on the Home Assistant box (#56), and the image stays out of
+# backups (#103). It is also what lets the add-on be installed at all when the
+# box cannot build it: the runner is what CI moves onto, so it cannot depend
+# on that CI.
+#
+# Publishes when github-runner/config.yaml changes on main -- i.e. a version
+# bump, since the image tag is that version -- or by hand. amd64 only, like
+# the add-on.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - github-runner/config.yaml
+
+jobs:
+  publish:
+    name: Publish runner (amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve GHCR namespace
+        id: ns
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+
+      # Same pin and reason as publish-images.yml.
+      - name: Build and push add-on image
+        uses: home-assistant/builder@6cb4fd3d1338b6e22d0958a4bcb53e0965ea63b4 # 2026.02.1
+        with:
+          args: |
+            --amd64 \
+            --target /data/github-runner \
+            --image "amd64-addon-github-runner" \
+            --docker-hub "ghcr.io/${{ steps.ns.outputs.owner }}" \
+            --addon
+
+      - name: Verify the published image
+        run: |
+          version=$(yq -r '.version' github-runner/config.yaml)
+          image="ghcr.io/${{ steps.ns.outputs.owner }}/amd64-addon-github-runner:${version}"
+          docker pull "$image"
+          docker run --rm --entrypoint /bin/bash "$image" -c '
+            /usr/bin/docker --version &&
+            /opt/actions-runner/bin/Runner.Listener --version &&
+            test -x /opt/addon/run.sh'
+          echo "### Published \`$image\`" >> "$GITHUB_STEP_SUMMARY"
