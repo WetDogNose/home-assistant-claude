@@ -1,0 +1,46 @@
+name: "GitHub Actions Runner"
+version: "0.1.0"
+slug: github_runner
+description: >-
+  Self-hosted GitHub Actions runner for one private repository: one job at a
+  time, at low priority, with a cleanup before and after every job.
+url: https://github.com/WetDogNose/home-assistant-claude/tree/main/github-runner
+arch:
+  - amd64
+# No image: key, so Supervisor builds this add-on locally from the Dockerfile.
+# There is nothing to publish and no registry to trust.
+startup: application
+boot: auto
+# Docker's tini runs as PID 1 and reaps whatever a job leaves orphaned. The
+# base image has no s6-overlay, so this is the whole init system.
+init: true
+
+# Jobs use the HOST's Docker daemon (frenck/action-home-assistant runs
+# `docker run ghcr.io/home-assistant/home-assistant`). This only works with
+# protection mode OFF, and it makes any workflow this runner executes root on
+# the host. Register it ONLY to a private repository whose every pusher you
+# trust. Never a public one: a fork's pull request would run here.
+docker_api: true
+# For the heartbeat entity (sensor.github_runner_heartbeat) only.
+homeassistant_api: true
+# Default profile. The podman signal problem (the .NET GC hanging because the
+# default profile blocked signals between processes) does not apply: Docker's
+# profile allows signals inside the container.
+apparmor: true
+
+backup_exclude:
+  - "work" # job workspaces and the setup-python tool cache
+  - "runner/bin*" # runner binaries, re-copied from the image or self-updated
+  - "runner/externals*"
+  - "runner/_diag"
+
+options:
+  repository: ""
+  registration_token: ""
+  runner_name: homeassistant
+  labels: hlbw
+schema:
+  repository: match(^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$)
+  registration_token: password?
+  runner_name: match(^[A-Za-z0-9_.-]+$)
+  labels: match(^[A-Za-z0-9_.,-]+$)

@@ -1,0 +1,21 @@
+configuration:
+  repository:
+    name: Repository
+    description: >-
+      Full URL of the PRIVATE repository to serve, e.g.
+      https://github.com/owner/repo. Never a public repository.
+  registration_token:
+    name: Registration token
+    description: >-
+      Only needed for the first start. From the repository's Settings → Actions
+      → Runners → New self-hosted runner, or
+      `gh api -X POST repos/OWNER/REPO/actions/runners/registration-token`.
+      Valid for one hour.
+  runner_name:
+    name: Runner name
+    description: Name shown in the repository's runner list.
+  labels:
+    name: Labels
+    description: >-
+      Comma-separated labels, added to self-hosted, Linux and X64. Workflows
+      select this runner with `runs-on: [self-hosted, <label>]`.

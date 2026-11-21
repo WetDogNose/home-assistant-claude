@@ -1,0 +1,6 @@
+# Ubuntu, the OS GitHub's hosted runners use: the Actions runner is a .NET app
+# with no musl build (so not the Alpine HA bases), and actions/setup-python
+# only has prebuilt Pythons for Ubuntu releases, so on Debian it fails with
+# "version not found for this operating system".
+build_from:
+  amd64: ubuntu:24.04
